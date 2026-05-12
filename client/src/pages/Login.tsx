@@ -38,16 +38,9 @@ export function LoginPage() {
       <Card className="w-full max-w-md border-slate-200 shadow-sm">
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
-          <CardDescription className="space-y-2">
-            <span>
-              TechDr access only: <span className="font-medium text-foreground">contact@techdr.in</span> or{" "}
-              <span className="font-medium text-foreground">support@techdr.in</span>.
-            </span>
-            <span className="block text-xs text-muted-foreground">
-              If you changed <code className="rounded bg-muted px-1 py-0.5">TECHDR_PASSWORD</code> in{" "}
-              <code className="rounded bg-muted px-1 py-0.5">.env</code>, run{" "}
-              <code className="rounded bg-muted px-1 py-0.5">npm run db:seed</code> once so logins match the database.
-            </span>
+          <CardDescription>
+            TechDr access only: <span className="font-medium text-foreground">contact@techdr.in</span> or{" "}
+            <span className="font-medium text-foreground">support@techdr.in</span>.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
