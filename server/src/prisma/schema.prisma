@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+  clients      Client[]
+  jobs         GenerationJob[]
+}
+
+model Client {
+  id            String   @id @default(cuid())
+  name          String
+  doctorName    String
+  specialty     String[]
+  services      String[] @default([])
+  clinicName    String
+  city          String
+  brandType     String
+  postsPerMonth Int      @default(15)
+  useCarousels  Boolean  @default(false)
+  notes         String?
+  /** Inserted before hashtags in every generated supportingText (set at client create/edit). */
+  supportingTextDefault String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  specialDays   SpecialDay[]
+  topicHistory  TopicHistory[]
+  jobs          GenerationJob[]
+}
+
+model SpecialDay {
+  id       String @id @default(cuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  label    String
+  date     String
+  type     String
+}
+
+model TopicHistory {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  month     Int
+  year      Int
+  topic     String
+  style     String
+  postType  String
+  createdAt DateTime @default(now())
+}
+
+model GenerationJob {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  status    String   @default("pending")
+  month     Int
+  year      Int
+  postCount Int
+  fileUrl   String?
+  errorMsg  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
