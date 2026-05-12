@@ -130,7 +130,7 @@ export function GeneratorPage() {
     sessionEvent.progress < 72;
 
   const currentJobIncomplete =
-    Boolean(sessionEvent) &&
+    sessionEvent !== null &&
     sessionEvent.status !== "done" &&
     sessionEvent.status !== "failed" &&
     sessionEvent.status !== "cancelled";
