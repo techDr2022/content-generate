@@ -2,6 +2,11 @@ import axios from "axios";
 
 const baseURL = import.meta.env.VITE_API_URL ?? "";
 
+function apiOriginConfigured(): boolean {
+  const v = import.meta.env.VITE_API_URL;
+  return typeof v === "string" && v.trim().length > 0;
+}
+
 export const api = axios.create({
   baseURL: baseURL || undefined,
   withCredentials: true,
@@ -18,12 +23,18 @@ api.interceptors.request.use((config) => {
 /** Prefer server `error` JSON; avoid raw axios "status code 401" strings. */
 export function getApiErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
-    const data = err.response?.data as { error?: string } | undefined;
+    const raw = err.response?.data;
+    const data =
+      typeof raw === "object" && raw !== null ? (raw as { error?: string }) : undefined;
     if (data?.error) return data.error;
-    if (err.response?.status === 401) {
+    const status = err.response?.status;
+    if (!apiOriginConfigured() && status === 404) {
+      return "The UI is not pointed at your API. In Vercel (or your host), set environment variable VITE_API_URL to your backend base URL (https://your-api.example.com, no trailing slash), save, then redeploy so the build embeds it.";
+    }
+    if (status === 401) {
       return "Invalid credentials or your session expired. Sign in again.";
     }
-    if (err.response?.status === 403) {
+    if (status === 403) {
       return data?.error ?? "You don’t have permission for this action.";
     }
   }

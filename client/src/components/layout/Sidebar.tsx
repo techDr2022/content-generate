@@ -14,8 +14,8 @@ const links = [
 
 export function Sidebar() {
   return (
-    <aside className="hidden w-56 shrink-0 border-r bg-white md:block">
-      <div className="flex h-full flex-col gap-1 p-3">
+    <aside className="sticky top-14 z-40 hidden max-h-[calc(100vh-3.5rem)] min-h-[calc(100vh-3.5rem)] w-56 shrink-0 self-start overflow-y-auto border-r bg-white md:block">
+      <div className="flex min-h-full flex-col gap-1 p-3">
         <div className="mb-4 px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Navigation</div>
         {links.map((link) => (
           <NavLink

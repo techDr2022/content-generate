@@ -3,13 +3,16 @@ import fs from "fs";
 import ExcelJS from "exceljs";
 import { Job } from "bullmq";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import type { CalendarPost } from "@hc/shared";
 import { addGenerateJobWithRetry } from "../lib/queueEnqueue";
+import { useCronDatabaseJobRunner } from "../lib/jobRunnerMode";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { addSseConnection, emitJobProgress, removeSseConnection } from "../services/sseHub";
 import { getContentQueue } from "../services/jobQueue";
 import { getLocalWorkbookPath } from "../services/storageService";
+import { generationJobRowToPayload } from "../services/generationRunner";
 
 export async function listJobs(req: Request, res: Response): Promise<void> {
   const userId = req.auth!.sub;
@@ -49,7 +52,9 @@ export async function cancelJob(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    await getContentQueue().remove(jobId);
+    if (!useCronDatabaseJobRunner()) {
+      await getContentQueue().remove(jobId);
+    }
   } catch {
     // Job may already be active; worker cooperates via DB status.
   }
@@ -296,6 +301,17 @@ export async function regenerateJob(req: Request, res: Response): Promise<void> 
       ? body.postCountOverride
       : failed.postCount;
 
+  const mergedPayload: Record<string, unknown> = {
+    ...(failed.payload !== null &&
+    typeof failed.payload === "object" &&
+    !Array.isArray(failed.payload)
+      ? (failed.payload as Record<string, unknown>)
+      : {}),
+  };
+  if (body.postCountOverride !== undefined) {
+    mergedPayload.postCountOverride = body.postCountOverride;
+  }
+
   const job = await prisma.generationJob.create({
     data: {
       clientId: failed.clientId,
@@ -304,29 +320,28 @@ export async function regenerateJob(req: Request, res: Response): Promise<void> 
       year: failed.year,
       postCount,
       status: "pending",
+      ...(Object.keys(mergedPayload).length > 0
+        ? { payload: mergedPayload as Prisma.InputJsonValue }
+        : {}),
     },
   });
 
-  const payload = {
-    jobId: job.id,
-    clientId: failed.clientId,
-    month: failed.month,
-    year: failed.year,
-    userId,
-    postCountOverride: body.postCountOverride,
-  };
-  try {
-    await addGenerateJobWithRetry(getContentQueue(), payload, { jobId: job.id, attempts: 1 });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    await prisma.generationJob.update({
-      where: { id: job.id },
-      data: { status: "failed", errorMsg: `Could not reach job queue (Redis): ${msg}` },
-    });
-    throw new HttpError(
-      503,
-      "Could not enqueue the job after several retries. Check REDIS_URL and try again."
-    );
+  const payload = generationJobRowToPayload(job);
+
+  if (!useCronDatabaseJobRunner()) {
+    try {
+      await addGenerateJobWithRetry(getContentQueue(), payload, { jobId: job.id, attempts: 1 });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await prisma.generationJob.update({
+        where: { id: job.id },
+        data: { status: "failed", errorMsg: `Could not reach job queue (Redis): ${msg}` },
+      });
+      throw new HttpError(
+        503,
+        "Could not enqueue the job after several retries. Check REDIS_URL and try again."
+      );
+    }
   }
 
   res.status(202).json({

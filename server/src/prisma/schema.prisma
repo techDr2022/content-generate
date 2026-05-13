@@ -71,6 +71,8 @@ model GenerationJob {
   month     Int
   year      Int
   postCount Int
+  /** Extra enqueue fields for serverless/cron replay (e.g. extra special days, overrides). */
+  payload   Json?
   fileUrl   String?
   errorMsg  String?
   createdAt DateTime @default(now())

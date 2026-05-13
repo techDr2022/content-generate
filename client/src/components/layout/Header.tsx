@@ -16,7 +16,7 @@ export function Header({ userName }: HeaderProps) {
   }
 
   return (
-    <header className="flex items-center justify-between border-b bg-white px-4 py-3">
+    <header className="sticky top-0 z-50 flex h-14 shrink-0 items-center justify-between border-b bg-white px-4">
       <div className="text-sm font-semibold text-primary">techDr Content Studio</div>
       <div className="flex items-center gap-3 text-sm text-muted-foreground">
         <span className="inline-flex items-center gap-1">

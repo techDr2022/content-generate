@@ -1,0 +1,16 @@
+{
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "outputDirectory": "client/dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "functions": {
+    "api/cron/run-worker.ts": { "maxDuration": 300 },
+    "api/[...path].ts": { "maxDuration": 300 }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/run-worker",
+      "schedule": "* * * * *"
+    }
+  ]
+}

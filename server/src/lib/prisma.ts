@@ -8,6 +8,7 @@ export const prisma =
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
   });
 
-if (process.env.NODE_ENV !== "production") {
+/** Reuse one client across warm serverless invocations (Vercel) and local dev. */
+if (process.env.NODE_ENV !== "production" || process.env.VERCEL === "1") {
   globalForPrisma.prisma = prisma;
 }

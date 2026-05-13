@@ -22,9 +22,11 @@ export function createApp(): express.Express {
   app.use(express.json({ limit: "2mb" }));
   app.use(apiLimiter);
 
-  app.get("/health", (_req, res) => {
+  const healthResponse = (_req: express.Request, res: express.Response) => {
     res.json({ success: true, data: { ok: true } });
-  });
+  };
+  app.get("/health", healthResponse);
+  app.get("/api/health", healthResponse);
 
   app.use("/api/auth", authRoutes);
   app.use("/api/clients", clientRoutes);
