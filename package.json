@@ -2,11 +2,15 @@
   "name": "healthcare-content-calendar",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "next dev",
     "dev:all": "concurrently -k -n next,worker -c cyan,magenta \"next dev\" \"tsx scripts/run-generation-worker.ts\"",
     "worker": "tsx scripts/run-generation-worker.ts",
     "build": "prisma generate && next build",
+    "build:server": "npm run build",
     "start": "next start",
     "lint": "next lint",
     "postinstall": "prisma generate",
