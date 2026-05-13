@@ -10,7 +10,7 @@ import { CalendarPreview } from "@/components/calendar/CalendarPreview";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { useClients } from "@/hooks/useClients";
-import { useCancelJob, useEnqueueGenerate, useJobPreview, useSuggestSpecialDays } from "@/hooks/useGenerator";
+import { useCancelJob, useEnqueueGenerate, useJob, useJobPreview, useSuggestSpecialDays } from "@/hooks/useGenerator";
 import { useEnqueueBulkGenerate } from "@/hooks/useBulkExport";
 import { useJobProgress } from "@/hooks/useJobProgress";
 import { formatDuration } from "@/lib/formatDuration";
@@ -68,8 +68,6 @@ export function GeneratorPage() {
     }
   }, []);
 
-  const { lastEvent } = useJobProgress(user?.id);
-
   const [clientId, setClientId] = useState("");
   const [year, setYear] = useState(new Date().getFullYear());
   const [months, setMonths] = useState<number[]>([new Date().getMonth() + 1]);
@@ -89,10 +87,22 @@ export function GeneratorPage() {
     year: number;
   } | null>(null);
   const [enqueueError, setEnqueueError] = useState<string | null>(null);
+  /** Bump when a new batch is successfully enqueued so SSE drops stale events and reconnects. */
+  const [progressStreamSession, setProgressStreamSession] = useState(0);
+
+  const { lastEvent, streamError } = useJobProgress(user?.id, progressStreamSession);
 
   const completedCount = completedIds.size;
   const batchActive =
     sessionJobs.length > 0 && completedCount < sessionJobs.length && runStartedAt !== null;
+
+  /** First session job not yet marked complete in UI (for DB polling). */
+  const activeJobId = useMemo(() => {
+    if (!batchActive || sessionJobs.length === 0) return undefined;
+    return sessionJobs.find((id) => !completedIds.has(id));
+  }, [batchActive, sessionJobs, completedIds]);
+
+  const activeJobPoll = useJob(activeJobId);
 
   const selectedClient = useMemo(
     () => clients.data?.find((c) => c.id === clientId),
@@ -121,9 +131,47 @@ export function GeneratorPage() {
     }
   }, [lastEvent, sessionJobs, months, year]);
 
+  useEffect(() => {
+    const job = activeJobPoll.data;
+    if (!job || !activeJobId) return;
+    if (!sessionJobs.includes(activeJobId)) return;
+    if (job.status !== "done" && job.status !== "failed" && job.status !== "cancelled") return;
+
+    setCompletedIds((prev) => {
+      if (prev.has(activeJobId)) return prev;
+      return new Set(prev).add(activeJobId);
+    });
+
+    if (job.status === "done") {
+      setLastDone((prev) => {
+        if (prev?.jobId === activeJobId) return prev;
+        return {
+          jobId: activeJobId,
+          clientName: job.client?.name ?? selectedClient?.name ?? "Client",
+          month: job.month,
+          year: job.year,
+        };
+      });
+      setProgress(100);
+    }
+  }, [activeJobPoll.data, activeJobId, sessionJobs, selectedClient?.name]);
+
   const wallElapsedMs = runStartedAt ? Date.now() - runStartedAt : 0;
   const sessionEvent =
     lastEvent && sessionJobs.includes(lastEvent.jobId) ? lastEvent : null;
+  const pollStatus = activeJobPoll.data?.status;
+
+  const effectiveLiveProgress =
+    sessionEvent?.progress ??
+    (batchActive &&
+    activeJobId !== undefined &&
+    !completedIds.has(activeJobId) &&
+    (pollStatus === "pending" || pollStatus === "processing")
+      ? pollStatus === "processing"
+        ? 42
+        : 12
+      : progress);
+
   const inClaudePhase =
     Boolean(sessionEvent?.phase?.includes("Claude")) &&
     sessionEvent &&
@@ -131,20 +179,44 @@ export function GeneratorPage() {
     sessionEvent.progress < 72;
 
   const currentJobIncomplete =
-    sessionEvent !== null &&
-    sessionEvent.status !== "done" &&
-    sessionEvent.status !== "failed" &&
-    sessionEvent.status !== "cancelled";
+    (sessionEvent !== null &&
+      sessionEvent.status !== "done" &&
+      sessionEvent.status !== "failed" &&
+      sessionEvent.status !== "cancelled") ||
+    (activeJobId !== undefined &&
+      batchActive &&
+      (pollStatus === "pending" || pollStatus === "processing") &&
+      !completedIds.has(activeJobId));
+
+  const pollPhaseHint =
+    batchActive && !sessionEvent && activeJobId !== undefined
+      ? pollStatus === "processing"
+        ? "Processing… Claude usually needs 1–3 minutes for this step."
+        : pollStatus === "pending"
+          ? "Job queued; waiting for the worker to pick it up…"
+          : null
+      : null;
+
+  /**
+   * True when the job row is still `pending` in the DB long after enqueue — meaning no worker
+   * consumed the BullMQ job. We poll `/api/jobs/:id` so we do NOT rely on SSE (which can lag),
+   * avoiding false "waiting on worker" while `npm run dev:all` is healthy.
+   */
+  const stuckPendingNoWorker =
+    Boolean(activeJobId) &&
+    batchActive &&
+    wallElapsedMs >= 22_000 &&
+    !activeJobPoll.isLoading &&
+    !activeJobPoll.isError &&
+    activeJobPoll.data?.status === "pending";
   const barPercent =
     sessionJobs.length <= 1
-      ? progress
+      ? Math.min(100, effectiveLiveProgress)
       : Math.min(
           100,
           Math.round(
             (completedCount * 100) / sessionJobs.length +
-              (currentJobIncomplete && sessionEvent
-                ? sessionEvent.progress / sessionJobs.length
-                : 0)
+              (currentJobIncomplete ? effectiveLiveProgress / sessionJobs.length : 0)
           )
         );
 
@@ -223,6 +295,7 @@ export function GeneratorPage() {
           extraSpecialDays: extraDaysForCalendarMonth(months[0]!, year),
         });
         setSessionJobs([job.id]);
+        setProgressStreamSession((k) => k + 1);
       } else {
         const jobs = await enqueueBulk.mutateAsync(
           months.map((m) => ({
@@ -232,6 +305,7 @@ export function GeneratorPage() {
           }))
         );
         setSessionJobs(jobs.map((j) => j.id));
+        setProgressStreamSession((k) => k + 1);
       }
       setRunStartedAt(Date.now());
     } catch (err) {
@@ -248,7 +322,7 @@ export function GeneratorPage() {
   return (
     <PageWrapper
       title="Generator"
-      description="Queue Claude-powered calendars per client and month. SSE keeps the UI synced with BullMQ workers."
+      description="Queue Claude-powered calendars per client and month. Local dev needs Redis plus the generation worker (use npm run dev:all or npm run worker in a second terminal)."
     >
       <GeneratorForm
         clients={clients.data ?? []}
@@ -300,10 +374,29 @@ export function GeneratorPage() {
           </Button>
         ) : null}
         <span className="text-xs text-muted-foreground">
-          {sessionJobs.length ? `${sessionJobs.length} job(s) queued` : "Jobs enqueue instantly; workers respect concurrency 3."}
+          {sessionJobs.length
+            ? `${sessionJobs.length} job(s) queued`
+            : "Jobs enqueue in this app; a separate worker process runs Claude + Excel (npm run dev:all or npm run worker)."}
           {batchActive ? " · Stop cancels queued work; if Claude is already running, it may finish the current API call." : ""}
         </span>
       </div>
+
+      {stuckPendingNoWorker ? (
+        <div
+          className="rounded-md border border-amber-500/50 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-400/40 dark:bg-amber-950/40 dark:text-amber-50"
+          role="status"
+        >
+          <p className="font-medium">Generation is waiting on the worker</p>
+          <p className="mt-1 text-xs leading-relaxed opacity-95">
+            This screen only <em>queues</em> jobs. Run the BullMQ worker so Redis jobs execute: from the project root, in a{" "}
+            <strong>second terminal</strong> run <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run worker</code>{" "}
+            (same <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">.env</code> /{" "}
+            <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">.env.local</code> as <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run dev</code>
+            ), or use <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run dev:all</code> to start Next and the worker together. Ensure{" "}
+            <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">REDIS_URL</code> is set.
+          </p>
+        </div>
+      ) : null}
 
       {sessionJobs.length > 1 ? (
         <p className="text-xs text-muted-foreground">
@@ -342,11 +435,15 @@ export function GeneratorPage() {
         {sessionEvent?.phase ? (
           <p className="text-sm leading-snug text-foreground">{sessionEvent.phase}</p>
         ) : batchActive ? (
-          <p className="text-sm text-muted-foreground">
-            {progress > 0
-              ? "Processing… Claude usually needs 1–3 minutes for this step."
-              : "Connecting to progress stream…"}
-          </p>
+          <div className="space-y-1">
+            {streamError ? (
+              <p className="text-sm leading-snug text-amber-800 dark:text-amber-100">{streamError}</p>
+            ) : null}
+            <p className="text-sm text-muted-foreground">
+              {pollPhaseHint ??
+                (activeJobPoll.isLoading ? "Fetching job status…" : "Connecting to progress stream…")}
+            </p>
+          </div>
         ) : null}
         {inClaudePhase ? (
           <p className="text-xs text-amber-800 dark:text-amber-200/90">
@@ -359,10 +456,21 @@ export function GeneratorPage() {
         />
       </div>
 
-      {lastEvent && sessionJobs.includes(lastEvent.jobId) && lastEvent.status === "failed" ? (
-        <p className="text-sm text-red-600">Job failed: {lastEvent.errorMsg ?? "Unknown error"}</p>
+      {(lastEvent && sessionJobs.includes(lastEvent.jobId) && lastEvent.status === "failed") ||
+      (activeJobId &&
+        sessionJobs.includes(activeJobId) &&
+        activeJobPoll.data?.status === "failed") ? (
+        <p className="text-sm text-red-600">
+          Job failed:{" "}
+          {(lastEvent && sessionJobs.includes(lastEvent.jobId) && lastEvent.status === "failed"
+            ? lastEvent.errorMsg
+            : activeJobPoll.data?.errorMsg) ?? "Unknown error"}
+        </p>
       ) : null}
-      {lastEvent && sessionJobs.includes(lastEvent.jobId) && lastEvent.status === "cancelled" ? (
+      {(lastEvent && sessionJobs.includes(lastEvent.jobId) && lastEvent.status === "cancelled") ||
+      (activeJobId &&
+        sessionJobs.includes(activeJobId) &&
+        activeJobPoll.data?.status === "cancelled") ? (
         <p className="text-sm text-muted-foreground">Generation stopped before completion.</p>
       ) : null}
 
