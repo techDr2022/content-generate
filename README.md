@@ -16,11 +16,13 @@ cd /path/to/content-generate
 npm install
 ```
 
-The `postinstall` script builds the `@hc/shared` workspace package so the server and client can import shared types.
+The root `postinstall` builds the `@hc/shared` workspace; the `server` workspace has its own `postinstall` that runs `prisma generate`. Both run automatically.
 
 ## Environment
 
 Copy `.env.example` to **`.env` in the repository root** (recommended) or to `server/.env`. The API (`server/src/loadEnv.ts`) and the root **`npm run db:migrate` / `db:seed`** scripts load both paths (later file wins on duplicate keys). Never commit real secrets.
+
+For the **client** in local dev, you generally **do not need** a `.env` file — the Vite dev server proxies `/api` to `http://localhost:4000`. If you want to point the dev client at a different backend, copy `client/.env.example` to `client/.env.local` and set `VITE_API_URL`.
 
 Typical production stack:
 
@@ -58,9 +60,10 @@ Presigned URLs use the same client in both cases.
 
 ### Other
 
-- `JWT_SECRET`, `ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL`
+- `JWT_SECRET`, `ANTHROPIC_API_KEY`, optional `ANTHROPIC_MODEL`, `OPENAI_API_KEY` (poster images)
 - `PUBLIC_APP_URL` — public base URL of this API (used in some LOCAL download links)
-- `STORAGE_TYPE=LOCAL` for laptop-only dev (files under `LOCAL_STORAGE_PATH`)
+- `FRONTEND_URL` — comma-separated browser origins allowed by CORS (e.g. `https://your-app.vercel.app`). If empty in dev, CORS reflects the request origin
+- `STORAGE_TYPE=LOCAL` for laptop-only dev (files under `LOCAL_STORAGE_PATH`). On Railway the LOCAL filesystem is ephemeral — use `STORAGE_TYPE=S3` (R2 / S3) in production
 - `VITE_API_URL` — set when the browser must call a different origin than the Vite dev server; empty locally uses the Vite `/api` proxy
 
 ## Database
@@ -93,7 +96,74 @@ npm run dev
 npm run build
 ```
 
-Run the compiled server with `npm run start -w server` after building.
+Run the compiled server with `npm start` (or `npm run start -w server`) after building.
+
+## Deployment
+
+The project is designed for a **split deploy**:
+
+```
+Frontend  →  Vercel    (static SPA from client/dist)
+Backend   →  Railway   (Express + BullMQ worker)
+PostgreSQL → Neon      (or Railway Postgres)
+Redis     →  Railway   (Redis add-on)
+Storage   →  Cloudflare R2 or AWS S3
+```
+
+### 1) Backend on Railway
+
+1. Create a Railway project → **New service → Deploy from GitHub repo** → pick this repo.
+2. Add a **Redis** service (New → Database → Redis) — Railway exposes `REDIS_URL` as a variable on the same project. Reference it from the API service.
+3. Add a **PostgreSQL** if you don't already use Neon: New → Database → Postgres. Or paste your Neon pooler URL.
+4. Set the API service **Variables** (Settings → Variables) — at minimum:
+
+   ```
+   DATABASE_URL=postgresql://...?sslmode=require
+   REDIS_URL=redis://default:PASSWORD@host:6379
+   JWT_SECRET=<long random string>
+   ANTHROPIC_API_KEY=...
+   OPENAI_API_KEY=...
+   STORAGE_TYPE=S3
+   S3_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
+   AWS_BUCKET_NAME=content-gen
+   AWS_REGION=auto
+   AWS_ACCESS_KEY_ID=...
+   AWS_SECRET_ACCESS_KEY=...
+   S3_FORCE_PATH_STYLE=true
+   FRONTEND_URL=https://YOUR-APP.vercel.app
+   PUBLIC_APP_URL=https://YOUR-API.up.railway.app
+   ```
+
+5. Railway reads `railway.json` (already in this repo). It will:
+   - `npm ci && npm run build:server` at build time
+   - `npm run db:deploy && npm start` at boot (applies any pending Prisma migrations, then starts the API + BullMQ worker)
+6. Generate a **public domain** for the service (Settings → Networking → Generate Domain). Copy that URL — it is the `VITE_API_URL` for the frontend.
+
+### 2) Frontend on Vercel
+
+1. **Import the same repo** into Vercel.
+2. Vercel will detect `vercel.json` which configures the project for **client-only**:
+   - `installCommand`: `npm ci --no-audit --no-fund`
+   - `buildCommand`: `npm run build -w shared && npm run build -w client`
+   - `outputDirectory`: `client/dist`
+3. Add a **Project Environment Variable**:
+
+   ```
+   VITE_API_URL=https://YOUR-API.up.railway.app
+   ```
+
+   (no trailing slash). Re-deploy so the value is baked into the build.
+4. Done. The static SPA loads on Vercel, the browser calls Railway directly.
+
+### Local development
+
+```bash
+npm install
+npm run dev
+```
+
+- API: `http://localhost:4000`
+- Client: `http://localhost:5173` (Vite proxies `/api` and `/api/jobs/stream` to the API; leave `VITE_API_URL` unset)
 
 ## Architecture snapshot
 
