@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -53,10 +54,13 @@ export function PosterImageDialog({
         ) : null}
         {previewSrc ? (
           <div className="space-y-3">
-            <img
+            <Image
               src={previewSrc}
               alt="Generated poster preview"
-              className="mx-auto max-h-[65vh] w-auto max-w-full rounded-md border object-contain"
+              width={1024}
+              height={1024}
+              unoptimized
+              className="mx-auto max-h-[65vh] h-auto w-auto max-w-full rounded-md border object-contain"
             />
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="secondary" size="sm" asChild>
