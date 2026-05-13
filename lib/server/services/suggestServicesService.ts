@@ -69,9 +69,7 @@ export async function suggestServicesWithClaude(params: {
   }
 
   const allowedCatalog = getAvailableServicesForSpecialties(params.specialties as MedicalSpecialty[]);
-  if (allowedCatalog.length === 0) {
-    throw new Error("No service catalog for the selected specialties");
-  }
+  const catalogOnly = allowedCatalog.length > 0;
 
   const model = anthropicModel();
   const system = `You are a healthcare digital marketing assistant. You output ONLY valid JSON — no markdown, no explanation outside JSON.`;
@@ -85,6 +83,11 @@ export async function suggestServicesWithClaude(params: {
     .filter(Boolean)
     .join("\n");
 
+  const catalogBlock = catalogOnly
+    ? `ALLOWED SERVICE LINES — you MUST prefer EXACT strings from this list (copy spelling and punctuation exactly). Only add a short custom line if essential and it reads like a single service offering (max 120 characters, plain text):
+${JSON.stringify(allowedCatalog)}`
+    : `There is no fixed service catalog for these specialty labels. Propose 8–18 concise, realistic marketing "service lines" (plain text, max 120 characters each) that fit the specialty names and client context. Each line must read like a single offering (no hashtags, no HTML).`;
+
   const user = `TASK: Pick an ordered list of marketing "service lines" for this medical client's profile.
 
 SELECTED SPECIALTIES (must stay within these): ${JSON.stringify(params.specialties)}
@@ -92,13 +95,12 @@ SELECTED SPECIALTIES (must stay within these): ${JSON.stringify(params.specialti
 CLIENT CONTEXT:
 ${ctx || "(none)"}
 
-ALLOWED SERVICE LINES — you MUST prefer EXACT strings from this list (copy spelling and punctuation exactly). Only add a short custom line if essential and it reads like a single service offering (max 120 characters, plain text):
-${JSON.stringify(allowedCatalog)}
+${catalogBlock}
 
 RULES:
 1. Order matters: put the STRONGEST / most differentiating services FIRST (generator uses priority).
-2. Prefer 10–24 lines when the catalog allows; fewer is OK for narrow practices.
-3. Every item must either be an EXACT match from ALLOWED SERVICE LINES above OR a valid short custom service label (no hashtags, no HTML).
+2. Prefer 10–24 lines when a large catalog exists; for custom-only specialties prefer 8–18 realistic lines.
+3. Every item must either be an EXACT match from the allowed catalog list (when provided) OR a valid short custom service label (no hashtags, no HTML).
 4. Return a JSON array of strings ONLY, e.g. ["Line one","Line two"]`;
 
   const client = new Anthropic({

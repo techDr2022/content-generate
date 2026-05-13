@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ClientDTO, MedicalSpecialty, SpecialDayDTO } from "@/lib/types";
+import type { ClientDTO, SpecialDayDTO } from "@/lib/types";
 import {
   getAvailableServicesForSpecialties,
+  getCustomServiceValidationMessage,
+  getCustomSpecialtyValidationMessage,
+  isCatalogMedicalSpecialty,
   isValidCustomServiceName,
+  isValidCustomSpecialtyName,
   MAX_CUSTOM_SERVICE_LENGTH,
+  MAX_CUSTOM_SPECIALTY_LENGTH,
   MAX_SERVICES_PER_CLIENT,
+  MAX_SPECIALTIES_PER_CLIENT,
   MEDICAL_SPECIALTIES,
   SPECIALTY_SERVICES,
 } from "@/lib/types";
-import { ChevronDown, ChevronUp, Loader2, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Search, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -95,10 +101,15 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
   const baseline = useMemo(() => mapInitial(initial), [initial]);
   const [values, setValues] = useState<ClientFormValues>(baseline);
   const [customServiceDraft, setCustomServiceDraft] = useState("");
+  const [customSpecialtyDraft, setCustomSpecialtyDraft] = useState("");
+  const [specialtySearchQuery, setSpecialtySearchQuery] = useState("");
   const suggestServices = useSuggestServices();
 
   useEffect(() => {
     setValues(mapInitial(initial));
+    setCustomServiceDraft("");
+    setCustomSpecialtyDraft("");
+    setSpecialtySearchQuery("");
   }, [initial]);
 
   function toggleSpecialty(s: string): void {
@@ -150,6 +161,36 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
     setCustomServiceDraft("");
   }
 
+  function removeCustomSpecialty(label: string): void {
+    setValues((v) => {
+      const specialty = v.specialty.filter((x) => x !== label);
+      if (specialty.length === 0) {
+        return { ...v, specialty, services: [] };
+      }
+      return {
+        ...v,
+        specialty,
+        services: sanitizeServicesForSpecialties(v.services, specialty),
+      };
+    });
+  }
+
+  function addCustomSpecialty(): void {
+    const t = customSpecialtyDraft.trim();
+    if (!isValidCustomSpecialtyName(t)) return;
+    setValues((v) => {
+      if (v.specialty.length >= MAX_SPECIALTIES_PER_CLIENT) return v;
+      if (v.specialty.some((s) => s.toLowerCase() === t.toLowerCase())) return v;
+      const specialty = [...v.specialty, t];
+      return {
+        ...v,
+        specialty,
+        services: sanitizeServicesForSpecialties(v.services, specialty),
+      };
+    });
+    setCustomSpecialtyDraft("");
+  }
+
   async function handleSuggestServicesWithAi(): Promise<void> {
     if (values.specialty.length === 0) return;
     if (values.services.length > 0) {
@@ -170,6 +211,39 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
       services: sanitizeServicesForSpecialties(list, v.specialty),
     }));
   }
+
+  const filteredCatalogSpecialties = useMemo(() => {
+    const q = specialtySearchQuery.trim().toLowerCase();
+    if (!q) return [...MEDICAL_SPECIALTIES];
+    return MEDICAL_SPECIALTIES.filter((s) => s.toLowerCase().includes(q));
+  }, [specialtySearchQuery]);
+
+  const hiddenSelectedCatalog = useMemo(() => {
+    const q = specialtySearchQuery.trim();
+    if (!q) return [];
+    const visible = new Set<string>(filteredCatalogSpecialties);
+    return values.specialty.filter((s) => isCatalogMedicalSpecialty(s) && !visible.has(s));
+  }, [specialtySearchQuery, values.specialty, filteredCatalogSpecialties]);
+
+  const customDraftTrim = customServiceDraft.trim();
+  const customValidationMsg = getCustomServiceValidationMessage(customServiceDraft);
+  const customIsDuplicate =
+    customDraftTrim.length >= 2 &&
+    values.services.some((s) => s.toLowerCase() === customDraftTrim.toLowerCase());
+  const canAddCustom =
+    values.services.length < MAX_SERVICES_PER_CLIENT &&
+    isValidCustomServiceName(customServiceDraft) &&
+    !customIsDuplicate;
+
+  const customSpecTrim = customSpecialtyDraft.trim();
+  const customSpecValidationMsg = getCustomSpecialtyValidationMessage(customSpecialtyDraft);
+  const customSpecIsDup =
+    customSpecTrim.length >= 2 &&
+    values.specialty.some((s) => s.toLowerCase() === customSpecTrim.toLowerCase());
+  const canAddCustomSpecialty =
+    values.specialty.length < MAX_SPECIALTIES_PER_CLIENT &&
+    isValidCustomSpecialtyName(customSpecialtyDraft) &&
+    !customSpecIsDup;
 
   return (
     <form
@@ -216,7 +290,58 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
       <div>
         <Label id="specialties-label">Specialties</Label>
         <p id="specialties-scroll-hint" className="mt-1 text-xs text-muted-foreground">
-          Scroll up and down in the box below to browse all specialties.
+          Search the catalog, tick to select, or add a custom specialty below. Up to {MAX_SPECIALTIES_PER_CLIENT} total.
+        </p>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              id="specialty-search"
+              type="search"
+              className="pl-9"
+              placeholder="Search catalog specialties…"
+              value={specialtySearchQuery}
+              onChange={(e) => setSpecialtySearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (filteredCatalogSpecialties.length === 1) {
+                    toggleSpecialty(filteredCatalogSpecialties[0]);
+                  }
+                }
+              }}
+              autoComplete="off"
+              aria-describedby="specialties-scroll-hint"
+            />
+          </div>
+          {specialtySearchQuery.trim() ? (
+            <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={() => setSpecialtySearchQuery("")}>
+              Clear search
+            </Button>
+          ) : null}
+        </div>
+        {hiddenSelectedCatalog.length > 0 ? (
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Selected but not in current filter:{" "}
+            <span className="font-medium text-foreground">{hiddenSelectedCatalog.join(", ")}</span>
+            {" · "}
+            <button
+              type="button"
+              className="font-medium text-primary underline-offset-2 hover:underline"
+              onClick={() => setSpecialtySearchQuery("")}
+            >
+              Show full catalog
+            </button>
+          </p>
+        ) : null}
+        <p className="mt-1 text-xs text-muted-foreground">
+          {specialtySearchQuery.trim()
+            ? `Showing ${filteredCatalogSpecialties.length} of ${MEDICAL_SPECIALTIES.length} catalog specialties.`
+            : `${MEDICAL_SPECIALTIES.length} catalog specialties — use search to narrow the list.`}
+          {filteredCatalogSpecialties.length === 1 ? " Press Enter in search to toggle the only match." : null}
         </p>
         <div
           role="group"
@@ -224,13 +349,106 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
           aria-describedby="specialties-scroll-hint"
           className="mt-2 max-h-56 overflow-y-auto overscroll-y-contain rounded-md border border-input bg-muted/15 p-3 shadow-inner [-webkit-overflow-scrolling:touch]"
         >
-          <div className="grid gap-2 sm:grid-cols-2">
-            {MEDICAL_SPECIALTIES.map((s) => (
-              <label key={s} className="flex cursor-pointer items-center gap-2 text-sm">
-                <Checkbox checked={values.specialty.includes(s)} onCheckedChange={() => toggleSpecialty(s)} />
-                <span className="leading-snug">{s}</span>
-              </label>
-            ))}
+          {filteredCatalogSpecialties.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No catalog matches. Try another spelling, clear search, or add a custom specialty below.
+            </p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {filteredCatalogSpecialties.map((s) => (
+                <label key={s} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox checked={values.specialty.includes(s)} onCheckedChange={() => toggleSpecialty(s)} />
+                  <span className="leading-snug">{s}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        {values.specialty.some((s) => !isCatalogMedicalSpecialty(s)) ? (
+          <div className="mt-3 flex flex-wrap gap-2" aria-label="Custom specialties">
+            {values.specialty
+              .filter((s) => !isCatalogMedicalSpecialty(s))
+              .map((s) => (
+                <div
+                  key={s}
+                  className="inline-flex max-w-full items-center gap-1 rounded-full border bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground"
+                >
+                  <span className="min-w-0 truncate" title={s}>
+                    {s}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
+                    aria-label={`Remove custom specialty ${s}`}
+                    onClick={() => removeCustomSpecialty(s)}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+          </div>
+        ) : null}
+        <div className="mt-3 rounded-md border border-dashed border-primary/30 bg-muted/25 p-3">
+          <Label htmlFor="custom-specialty" className="text-sm font-medium">
+            Add custom specialty
+          </Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Use when your focus is not in the list (e.g. &quot;Sleep Medicine&quot;, &quot;Sports Cardiology&quot;). Custom labels have no preset service catalog — add service lines with{" "}
+            <span className="font-medium text-foreground">Add custom service</span> later, or use Suggest with AI.
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
+            <div className="min-w-0 flex-1">
+              <Input
+                id="custom-specialty"
+                placeholder="e.g. Bariatric & metabolic medicine"
+                maxLength={MAX_CUSTOM_SPECIALTY_LENGTH}
+                value={customSpecialtyDraft}
+                onChange={(e) => setCustomSpecialtyDraft(e.target.value)}
+                aria-invalid={Boolean(customSpecValidationMsg || (customSpecIsDup && customSpecTrim.length >= 2))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (canAddCustomSpecialty) addCustomSpecialty();
+                  }
+                }}
+              />
+              <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                {customSpecTrim.length} / {MAX_CUSTOM_SPECIALTY_LENGTH} · Enter to add · {values.specialty.length} /{" "}
+                {MAX_SPECIALTIES_PER_CLIENT} specialties
+              </p>
+              {customSpecValidationMsg ? (
+                <p className="mt-1 text-xs text-destructive" role="alert">
+                  {customSpecValidationMsg}
+                </p>
+              ) : null}
+              {customSpecIsDup && customSpecTrim.length >= 2 ? (
+                <p className="mt-1 text-xs text-destructive" role="alert">
+                  That specialty is already selected.
+                </p>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              className="shrink-0"
+              disabled={!canAddCustomSpecialty}
+              title={
+                values.specialty.length >= MAX_SPECIALTIES_PER_CLIENT
+                  ? `Maximum ${MAX_SPECIALTIES_PER_CLIENT} specialties`
+                  : customSpecIsDup
+                    ? "Already selected"
+                    : customSpecTrim.length === 0
+                      ? "Type a label, then add"
+                      : !isValidCustomSpecialtyName(customSpecialtyDraft)
+                        ? "Fix the issues shown below the field"
+                        : "Add to selected specialties"
+              }
+              onClick={addCustomSpecialty}
+            >
+              Add specialty
+            </Button>
           </div>
         </div>
       </div>
@@ -240,8 +458,7 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
           <div className="min-w-0 flex-1">
             <Label>Services offered</Label>
             <p className="mt-1 text-xs text-muted-foreground">
-              Options are grouped by each selected specialty. Pick catalog lines and/or add custom services. Order matters:
-              the generator treats earlier rows as higher priority. Use the up and down controls to reorder.
+              Pick lines from each specialty catalog below, <span className="font-medium text-foreground">add your own custom lines</span> (not in the catalog), or use &quot;Suggest with AI&quot;. Order matters: the generator treats earlier rows as higher priority. Reorder with the arrows.
             </p>
           </div>
           <Button
@@ -274,10 +491,74 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
           <p className="mt-2 text-sm text-muted-foreground">Select at least one specialty to see services.</p>
         ) : (
           <div className="mt-3 space-y-3">
+            <div className="rounded-md border border-dashed border-primary/30 bg-muted/25 p-3">
+              <Label htmlFor="custom-service" className="text-sm font-medium">
+                Add custom service
+              </Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Any line not in the catalog below — e.g. a named package, ward, or program. It is saved on the client and used like catalog lines (ordering + generator). Up to {MAX_SERVICES_PER_CLIENT} lines total including catalog picks.
+              </p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
+                <div className="min-w-0 flex-1">
+                  <Input
+                    id="custom-service"
+                    placeholder="e.g. Saturday walk-in skin clinic"
+                    maxLength={MAX_CUSTOM_SERVICE_LENGTH}
+                    value={customServiceDraft}
+                    onChange={(e) => setCustomServiceDraft(e.target.value)}
+                    aria-invalid={Boolean(customValidationMsg || (customIsDuplicate && customDraftTrim.length >= 2))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (canAddCustom) addCustomService();
+                      }
+                    }}
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                    {customDraftTrim.length} / {MAX_CUSTOM_SERVICE_LENGTH} characters · Press Enter to add
+                  </p>
+                  {customValidationMsg ? (
+                    <p className="mt-1 text-xs text-destructive" role="alert">
+                      {customValidationMsg}
+                    </p>
+                  ) : null}
+                  {customIsDuplicate && customDraftTrim.length >= 2 ? (
+                    <p className="mt-1 text-xs text-destructive" role="alert">
+                      That line is already in your priority list.
+                    </p>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="shrink-0"
+                  disabled={!canAddCustom}
+                  title={
+                    values.services.length >= MAX_SERVICES_PER_CLIENT
+                      ? `Maximum ${MAX_SERVICES_PER_CLIENT} services`
+                      : customIsDuplicate
+                        ? "Already in the list"
+                        : customDraftTrim.length === 0
+                          ? "Type a service line, then add"
+                          : !isValidCustomServiceName(customServiceDraft)
+                            ? "Fix the issues shown below the field"
+                            : "Add this line to the priority list"
+                  }
+                  onClick={addCustomService}
+                >
+                  Add to list
+                </Button>
+              </div>
+            </div>
+
             <div className="rounded-md border p-3">
-              <p className="text-xs font-medium text-muted-foreground">Priority order ({values.services.length} / {MAX_SERVICES_PER_CLIENT})</p>
+              <p className="text-xs font-medium text-muted-foreground">
+                Priority order ({values.services.length} / {MAX_SERVICES_PER_CLIENT})
+              </p>
               {values.services.length === 0 ? (
-                <p className="mt-2 text-sm text-muted-foreground">Select catalog items below or add a custom service.</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Add a custom line above and/or tick catalog items below.
+                </p>
               ) : (
                 <ul className="mt-2 space-y-1">
                   {values.services.map((svc, idx) => (
@@ -326,35 +607,6 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
                   ))}
                 </ul>
               )}
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
-                <div className="flex-1">
-                  <Label htmlFor="custom-service" className="text-xs">
-                    Additional custom service
-                  </Label>
-                  <Input
-                    id="custom-service"
-                    className="mt-1"
-                    placeholder="e.g. Saturday walk-in clinic"
-                    maxLength={MAX_CUSTOM_SERVICE_LENGTH}
-                    value={customServiceDraft}
-                    onChange={(e) => setCustomServiceDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        addCustomService();
-                      }
-                    }}
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={values.services.length >= MAX_SERVICES_PER_CLIENT || !isValidCustomServiceName(customServiceDraft)}
-                  onClick={addCustomService}
-                >
-                  Add
-                </Button>
-              </div>
             </div>
 
             <div
@@ -362,25 +614,35 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
               aria-label="Service catalog by specialty"
               className="rounded-md border p-3"
             >
+              <p className="mb-3 text-xs text-muted-foreground">Catalog — tick to add; untick to remove (same list as above).</p>
               <div className="space-y-4">
                 {values.specialty.map((sp) => {
-                  const list = SPECIALTY_SERVICES[sp as MedicalSpecialty];
-                  if (!list?.length) return null;
+                  const list = (SPECIALTY_SERVICES as Readonly<Record<string, readonly string[]>>)[sp];
+                  if (list?.length) {
+                    return (
+                      <div key={sp}>
+                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary">{sp}</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {list.map((svc) => (
+                            <label key={svc} className="flex items-start gap-2 text-sm leading-snug">
+                              <Checkbox
+                                className="mt-0.5"
+                                checked={values.services.includes(svc)}
+                                onCheckedChange={() => toggleService(svc)}
+                              />
+                              <span>{svc}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
                   return (
                     <div key={sp}>
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary">{sp}</p>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {list.map((svc) => (
-                          <label key={svc} className="flex items-start gap-2 text-sm leading-snug">
-                            <Checkbox
-                              className="mt-0.5"
-                              checked={values.services.includes(svc)}
-                              onCheckedChange={() => toggleService(svc)}
-                            />
-                            <span>{svc}</span>
-                          </label>
-                        ))}
-                      </div>
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{sp}</p>
+                      <p className="text-sm text-muted-foreground">
+                        No preset catalog for this label. Add services with <span className="font-medium text-foreground">Add custom service</span> above, or use Suggest with AI.
+                      </p>
                     </div>
                   );
                 })}

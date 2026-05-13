@@ -16,6 +16,18 @@ export const SPECIALTY_SERVICES: Record<MedicalSpecialty, readonly string[]> = {
     "Minimally invasive gynecologic surgery",
     "Preconception & fertility work-up",
   ],
+  Obstetrics: [
+    "Antenatal care & routine visits",
+    "High-risk pregnancy clinic",
+    "Labor & delivery / birthing suite",
+    "Obstetric ultrasound & fetal growth monitoring",
+    "Pre-eclampsia & gestational hypertension care",
+    "Gestational diabetes co-management",
+    "Postpartum care & recovery",
+    "VBAC counseling & trial of labor",
+    "Multiple pregnancy (twins+) care",
+    "Birth preparedness & antenatal education",
+  ],
   "Fertility & IVF": [
     "IVF & embryo transfer",
     "IUI (intrauterine insemination)",
@@ -40,17 +52,29 @@ export const SPECIALTY_SERVICES: Record<MedicalSpecialty, readonly string[]> = {
     "Travel & school health forms",
     "Lactation & newborn feeding support",
   ],
-  "Dermatology & Cosmetology": [
+  Dermatology: [
     "Acne & scar treatment",
     "Psoriasis & eczema care",
     "Skin cancer screening",
     "Mole mapping & biopsy",
     "Hair loss evaluation",
-    "Laser & light therapies",
-    "Chemical peels & medi-facials",
-    "Injectable aesthetics",
     "Pediatric dermatology",
     "Patch testing & contact allergy",
+    "Phototherapy & inflammatory skin disease",
+    "Rosacea & pigment disorders",
+    "Wound & ulcer dermatology liaison",
+  ],
+  Cosmetology: [
+    "Medical-grade facials & skin rejuvenation",
+    "Chemical peels & medi-facials",
+    "Laser hair removal",
+    "Laser & light therapies (IPL, resurfacing)",
+    "Injectable aesthetics (toxins & fillers)",
+    "Body contouring & tightening treatments",
+    "Acne scar resurfacing programs",
+    "Pigment & melasma aesthetic protocols",
+    "Bridal & event skin prep packages",
+    "Non-surgical anti-aging consults",
   ],
   Orthopaedics: [
     "Joint pain & arthritis care",
@@ -444,12 +468,26 @@ export const MAX_CUSTOM_SERVICE_LENGTH = 120;
 /** Max number of service lines per client (catalog + custom). */
 export const MAX_SERVICES_PER_CLIENT = 40;
 
+/**
+ * Validation message for a custom service draft, or null if the field is empty or the draft is valid.
+ */
+export function getCustomServiceValidationMessage(raw: string): string | null {
+  const t = raw.trim();
+  if (t.length === 0) return null;
+  if (t.length < 2) return "Enter at least 2 characters.";
+  if (t.length > MAX_CUSTOM_SERVICE_LENGTH) {
+    return `Keep it at or under ${MAX_CUSTOM_SERVICE_LENGTH} characters.`;
+  }
+  if (/[\r\n\t<>{}`\\]/.test(t)) {
+    return "Remove line breaks, tabs, and the characters < > { } ` \\.";
+  }
+  return null;
+}
+
 /** True if string is acceptable as an additional custom service (not necessarily in catalog). */
 export function isValidCustomServiceName(raw: string): boolean {
   const t = raw.trim();
-  if (t.length < 2 || t.length > MAX_CUSTOM_SERVICE_LENGTH) return false;
-  if (/[\r\n\t<>{}`\\]/.test(t)) return false;
-  return true;
+  return t.length >= 2 && getCustomServiceValidationMessage(raw) === null;
 }
 
 /** Each entry is either from the specialty catalog or a validated custom label. */

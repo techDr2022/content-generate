@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import type { ClientDTO } from "@/lib/types";
 import { MEDICAL_SPECIALTIES } from "@/lib/types";
 import { Input } from "@/components/ui/input";
@@ -22,6 +25,17 @@ export function ClientList({
   onSpecialtyChange,
   onOpenClient,
 }: ClientListProps) {
+  const [specialtyPickSearch, setSpecialtyPickSearch] = useState("");
+  const filteredSpecialtyPick = useMemo((): string[] => {
+    const q = specialtyPickSearch.trim().toLowerCase();
+    const catalog = MEDICAL_SPECIALTIES as readonly string[];
+    let base: string[] = !q ? [...MEDICAL_SPECIALTIES] : MEDICAL_SPECIALTIES.filter((s) => s.toLowerCase().includes(q));
+    if (specialtyFilter && catalog.includes(specialtyFilter) && !base.includes(specialtyFilter)) {
+      base = [specialtyFilter, ...base].sort((a, b) => a.localeCompare(b));
+    }
+    return base;
+  }, [specialtyPickSearch, specialtyFilter]);
+
   return (
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-3">
@@ -34,19 +48,32 @@ export function ClientList({
             onChange={(e) => onSearchChange(e.target.value)}
           />
         </div>
-        <div>
-          <Label>Specialty filter</Label>
+        <div className="space-y-2">
+          <Label htmlFor="specialty-filter-search">Specialty filter</Label>
+          <Input
+            id="specialty-filter-search"
+            type="search"
+            placeholder="Search specialties…"
+            value={specialtyPickSearch}
+            onChange={(e) => setSpecialtyPickSearch(e.target.value)}
+            className="text-sm"
+            autoComplete="off"
+          />
           <Select value={specialtyFilter || "all"} onValueChange={(v) => onSpecialtyChange(v === "all" ? "" : v)}>
             <SelectTrigger>
               <SelectValue placeholder="All specialties" />
             </SelectTrigger>
             <SelectContent className="max-h-[min(70vh,320px)]">
               <SelectItem value="all">All specialties</SelectItem>
-              {MEDICAL_SPECIALTIES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s}
-                </SelectItem>
-              ))}
+              {filteredSpecialtyPick.length === 0 ? (
+                <div className="px-2 py-3 text-center text-xs text-muted-foreground">No matches — clear search</div>
+              ) : (
+                filteredSpecialtyPick.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s}
+                  </SelectItem>
+                ))
+              )}
             </SelectContent>
           </Select>
         </div>

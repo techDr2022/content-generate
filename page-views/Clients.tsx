@@ -53,7 +53,7 @@ export function ClientsPage() {
   async function handleSubmit(values: ClientFormValues): Promise<void> {
     setSubmitError(null);
     if (values.specialty.length === 0) {
-      setSubmitError("Select at least one medical specialty before saving.");
+      setSubmitError("Select at least one specialty (catalog or custom) before saving.");
       return;
     }
     const payload = {

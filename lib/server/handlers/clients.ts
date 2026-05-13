@@ -1,12 +1,22 @@
 import { z } from "zod";
-import { MEDICAL_SPECIALTIES, validateClientServices } from "@/lib/types";
+import {
+  MEDICAL_SPECIALTIES,
+  validateClientServices,
+  isValidCustomSpecialtyName,
+  MAX_SPECIALTIES_PER_CLIENT,
+} from "@/lib/types";
 import { prisma } from "@/lib/server/prisma";
 import { HttpError } from "@/lib/server/http";
 import { fetchTopicHistoryLastSixMonths } from "@/lib/server/services/topicTracker";
 
 const specialtyValue = z
   .string()
-  .refine((s) => (MEDICAL_SPECIALTIES as readonly string[]).includes(s), "Invalid specialty");
+  .trim()
+  .min(1)
+  .refine(
+    (s) => (MEDICAL_SPECIALTIES as readonly string[]).includes(s) || isValidCustomSpecialtyName(s),
+    "Invalid specialty"
+  );
 
 const specialDaySchema = z.object({
   label: z.string().min(1),
@@ -24,7 +34,25 @@ function normalizePostsPerMonth(val: unknown): unknown {
 const clientBody = z.object({
   name: z.string().min(1),
   doctorName: z.string().min(1),
-  specialty: z.array(specialtyValue).min(1),
+  specialty: z
+    .array(specialtyValue)
+    .min(1)
+    .max(MAX_SPECIALTIES_PER_CLIENT)
+    .superRefine((arr, ctx) => {
+      const seen = new Set<string>();
+      for (let i = 0; i < arr.length; i++) {
+        const k = arr[i].toLowerCase();
+        if (seen.has(k)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Duplicate specialties",
+            path: [i],
+          });
+          return;
+        }
+        seen.add(k);
+      }
+    }),
   services: z.array(z.string()).optional().default([]),
   clinicName: z.string().min(1),
   city: z.string().min(1),
