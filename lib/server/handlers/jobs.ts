@@ -9,7 +9,7 @@ import { prisma } from "@/lib/server/prisma";
 import { HttpError } from "@/lib/server/http";
 import { addSseConnection, emitJobProgress, removeSseConnection } from "@/lib/server/services/sseHub";
 import { getContentQueue } from "@/lib/server/services/jobQueue";
-import { getLocalWorkbookPath } from "@/lib/server/services/storageService";
+import { getLocalWorkbookPath, loadWorkbookBufferForJob } from "@/lib/server/services/storageService";
 import { generationJobRowToPayload } from "@/lib/server/services/generationRunner";
 
 export async function listJobs(userId: string) {
@@ -213,17 +213,11 @@ export async function previewJobCalendar(userId: string, jobId: string) {
   if (!job) {
     throw new HttpError(404, "Completed job not found");
   }
-  const storage = process.env.STORAGE_TYPE ?? "LOCAL";
-  if (storage !== "LOCAL") {
-    throw new HttpError(400, "Preview is only available for LOCAL storage exports");
-  }
-  const workbookPath = getLocalWorkbookPath(job.id);
-  if (!fs.existsSync(workbookPath)) {
-    throw new HttpError(404, "Workbook not found on disk");
-  }
 
+  const buffer = await loadWorkbookBufferForJob({ id: job.id, fileUrl: job.fileUrl });
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(workbookPath);
+  // exceljs typings are stricter than Node's Buffer generic; runtime is fine.
+  await workbook.xlsx.load(buffer as never);
   const sheet = workbook.worksheets[0];
   if (!sheet) {
     throw new HttpError(500, "Workbook has no sheets");

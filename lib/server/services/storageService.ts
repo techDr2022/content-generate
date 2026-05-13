@@ -4,6 +4,7 @@ import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getS3Client } from "../s3";
 import { logger } from "../logger";
+import { HttpError } from "../http";
 
 /** Avoid opaque SDK errors when `.env` still has example R2 placeholders (wrong length / invalid). */
 function assertS3CredentialsReady(): void {
@@ -28,6 +29,22 @@ function assertS3CredentialsReady(): void {
   }
 }
 
+/**
+ * Directory where LOCAL workbooks are stored. Worker and Next must resolve the same path.
+ * Prefer `LOCAL_STORAGE_ABSOLUTE_PATH` when the worker runs in a separate process.
+ */
+export function getUploadsRoot(): string {
+  const absoluteOverride = process.env.LOCAL_STORAGE_ABSOLUTE_PATH?.trim();
+  if (absoluteOverride) {
+    return path.resolve(absoluteOverride);
+  }
+  const rel = process.env.LOCAL_STORAGE_PATH?.trim() ?? "./uploads";
+  if (path.isAbsolute(rel)) {
+    return path.normalize(rel);
+  }
+  return path.resolve(process.cwd(), rel);
+}
+
 export async function persistWorkbookForJob(jobId: string, workbookBuffer: Buffer): Promise<string> {
   const storageType = process.env.STORAGE_TYPE ?? "LOCAL";
 
@@ -47,8 +64,7 @@ function publicAppBase(): string {
 }
 
 async function saveLocal(jobId: string, workbookBuffer: Buffer): Promise<string> {
-  const baseDir = process.env.LOCAL_STORAGE_PATH ?? "./uploads";
-  const absDir = path.isAbsolute(baseDir) ? baseDir : path.join(process.cwd(), baseDir);
+  const absDir = getUploadsRoot();
   if (!fs.existsSync(absDir)) {
     fs.mkdirSync(absDir, { recursive: true });
   }
@@ -57,7 +73,7 @@ async function saveLocal(jobId: string, workbookBuffer: Buffer): Promise<string>
 
   const publicBase = publicAppBase();
   const fileUrl = `${publicBase.replace(/\/$/, "")}/api/jobs/${jobId}/download`;
-  logger.info("Stored workbook locally", { jobId, dest, fileUrl });
+  logger.info("Stored workbook locally", { jobId, dest, uploadsRoot: absDir, fileUrl });
   return fileUrl;
 }
 
@@ -90,7 +106,50 @@ async function uploadToS3(jobId: string, workbookBuffer: Buffer): Promise<string
 }
 
 export function getLocalWorkbookPath(jobId: string): string {
-  const baseDir = process.env.LOCAL_STORAGE_PATH ?? "./uploads";
-  const absDir = path.isAbsolute(baseDir) ? baseDir : path.join(process.cwd(), baseDir);
-  return path.join(absDir, `${jobId}.xlsx`);
+  return path.join(getUploadsRoot(), `${jobId}.xlsx`);
+}
+
+function isSameOriginApiDownloadUrl(fileUrl: string): boolean {
+  try {
+    const u = new URL(fileUrl);
+    return u.pathname.includes("/api/jobs/") && u.pathname.includes("/download");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Load workbook bytes: local disk first, then HTTP (S3 presigned / R2) when configured.
+ */
+export async function loadWorkbookBufferForJob(job: {
+  id: string;
+  fileUrl: string | null;
+}): Promise<Buffer> {
+  const storage = process.env.STORAGE_TYPE ?? "LOCAL";
+  const localPath = getLocalWorkbookPath(job.id);
+
+  if (fs.existsSync(localPath)) {
+    return fs.promises.readFile(localPath);
+  }
+
+  const url = job.fileUrl?.trim() ?? "";
+  const canFetchRemote =
+    url.startsWith("http") &&
+    (storage !== "LOCAL" || !isSameOriginApiDownloadUrl(url));
+
+  if (canFetchRemote) {
+    const res = await fetch(url, { redirect: "follow" });
+    if (!res.ok) {
+      throw new HttpError(502, `Could not fetch workbook from storage (HTTP ${res.status})`);
+    }
+    return Buffer.from(await res.arrayBuffer());
+  }
+
+  const root = getUploadsRoot();
+  throw new HttpError(
+    404,
+    `Workbook not found on disk at ${localPath}. Uploads root is ${root} (cwd=${process.cwd()}). ` +
+      `If you use \`npm run worker\` in another terminal, load the same env: add dotenv at the top of the worker script ` +
+      `or set LOCAL_STORAGE_ABSOLUTE_PATH to an absolute folder both processes use. For cloud deploys without a shared disk, use STORAGE_TYPE=S3.`
+  );
 }
