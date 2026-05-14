@@ -1,5 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import {
+  ANTHROPIC_SUGGEST_MAX_ATTEMPTS,
+  anthropicSuggestBackoffMs,
+  isRetryableAnthropicSuggestError,
+  sleep,
+} from "./anthropicSuggestRetry";
 
 const itemSchema = z.object({
   label: z.string().min(1),
@@ -37,7 +43,7 @@ function dateInTargetMonth(dateStr: string, month: number, year: number): boolea
 }
 
 function anthropicModel(): string {
-  return process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-20250514";
+  return process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-6";
 }
 
 function parseJsonArray(raw: string): unknown {
@@ -102,37 +108,50 @@ OUTPUT SHAPE (JSON array only):
     maxRetries: 0,
   });
 
-  const response = await client.messages.create({
-    model,
-    max_tokens: 4096,
-    system,
-    messages: [{ role: "user", content: user }],
-  });
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= ANTHROPIC_SUGGEST_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await client.messages.create({
+        model,
+        max_tokens: 4096,
+        system,
+        messages: [{ role: "user", content: user }],
+      });
 
-  const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
-    throw new Error("No text in Claude response");
+      const textBlock = response.content.find((b) => b.type === "text");
+      if (!textBlock || textBlock.type !== "text") {
+        throw new Error("No text in Claude response");
+      }
+
+      const parsed = parseJsonArray(textBlock.text);
+      if (!Array.isArray(parsed)) {
+        throw new Error("Expected JSON array from Claude");
+      }
+
+      const out: SuggestedSpecialDay[] = [];
+      const seen = new Set<string>();
+
+      for (const row of parsed) {
+        const one = itemSchema.safeParse(row);
+        if (!one.success) continue;
+        const item = one.data;
+        if (!dateInTargetMonth(item.date, params.month, params.year)) continue;
+        const key = `${item.date}|${item.label}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(item);
+      }
+
+      out.sort((a, b) => a.date.localeCompare(b.date));
+      return out;
+    } catch (err) {
+      lastError = err;
+      if (attempt >= ANTHROPIC_SUGGEST_MAX_ATTEMPTS || !isRetryableAnthropicSuggestError(err)) {
+        break;
+      }
+      await sleep(anthropicSuggestBackoffMs(attempt, err));
+    }
   }
 
-  const parsed = parseJsonArray(textBlock.text);
-  if (!Array.isArray(parsed)) {
-    throw new Error("Expected JSON array from Claude");
-  }
-
-  const out: SuggestedSpecialDay[] = [];
-  const seen = new Set<string>();
-
-  for (const row of parsed) {
-    const one = itemSchema.safeParse(row);
-    if (!one.success) continue;
-    const item = one.data;
-    if (!dateInTargetMonth(item.date, params.month, params.year)) continue;
-    const key = `${item.date}|${item.label}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-  }
-
-  out.sort((a, b) => a.date.localeCompare(b.date));
-  return out;
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }

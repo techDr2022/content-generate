@@ -59,6 +59,24 @@ export function JobHistoryPage() {
         cell: ({ row }) => <Badge variant="secondary">{row.original.status}</Badge>,
       },
       {
+        id: "failure",
+        header: "Failure details",
+        cell: ({ row }) => {
+          const j = row.original;
+          if (j.status !== "failed") {
+            return <span className="text-xs text-muted-foreground">—</span>;
+          }
+          if (!j.errorMsg?.trim()) {
+            return <span className="text-xs text-muted-foreground">No message stored</span>;
+          }
+          return (
+            <p className="max-w-[min(28rem,55vw)] whitespace-pre-wrap break-words text-xs text-destructive" title={j.errorMsg}>
+              {j.errorMsg}
+            </p>
+          );
+        },
+      },
+      {
         accessorKey: "createdAt",
         header: "Created",
         cell: ({ row }) => new Date(row.original.createdAt).toLocaleString(),
@@ -113,7 +131,7 @@ export function JobHistoryPage() {
   return (
     <PageWrapper
       title="Job history"
-      description="Audit every calendar generation, filter by client or status, and recover failed runs."
+      description="Audit every calendar generation, filter by client or status, and recover failed runs. Failed jobs show the server error under Failure details."
     >
       <div className="grid gap-3 md:grid-cols-4">
         <div>

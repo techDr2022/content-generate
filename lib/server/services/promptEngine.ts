@@ -11,6 +11,11 @@ export interface ClientPromptProfile {
   brandType: string;
   postsPerMonth: number;
   useCarousels: boolean;
+  /**
+   * When set (0…postsPerMonth), this run must contain exactly this many `Carousel` rows; the rest are `Poster`.
+   * Omitted = use `useCarousels` only (no fixed carousel count).
+   */
+  carouselCountForRun?: number;
   notes: string | null;
   /** Verbatim block inserted immediately before the hashtag section when non-empty. */
   supportingTextDefault: string | null;
@@ -59,11 +64,16 @@ function formatTopicHistory(topicHistory: TopicHistoryPrompt[]): string {
 
 function formatSpecialDays(specialDays: SpecialDayInput[]): string {
   if (specialDays.length === 0) {
-    return "(No user-defined special days for this month.)";
+    return "(No reserved special-day posts for this month.)";
   }
-  return specialDays
-    .map((s) => `- ${s.label} on ${s.date} [type: ${s.type}] — exactly ONE dedicated post; never duplicate this special day in the same month.`)
-    .join("\n");
+  const lines = specialDays.map(
+    (s) =>
+      `- ${s.label} — calendar date ${s.date} (ISO) [type: ${s.type}] — MANDATORY: exactly one JSON row on that calendar day with specialDayLabel set to this exact label, isAIAdded false, and on-theme copy; never duplicate this day in the same month.`
+  );
+  return (
+    lines.join("\n") +
+    '\n\nEach row\'s "date" field must use "DD MMM YYYY" format but refer to the SAME civil calendar day as the ISO date on the matching bullet above.'
+  );
 }
 
 /**
@@ -80,6 +90,20 @@ export function buildPrompt(
   const topicHistoryBlock = formatTopicHistory(topicHistory);
   const specialDaysBlock = formatSpecialDays(specialDays);
 
+  const carouselCountHard = typeof client.carouselCountForRun === "number";
+  const carouselN = carouselCountHard ? client.carouselCountForRun! : 0;
+  const posterRemainder = Math.max(0, client.postsPerMonth - carouselN);
+  /** One Messages response must hold the full array; large months need shorter fields. */
+  const compactCalendar = client.postsPerMonth >= 9;
+
+  const postTypeBlock = carouselCountHard
+    ? carouselN === 0
+      ? `- THIS RUN (hard requirement): Every row must have "type": "Poster" (total ${client.postsPerMonth} rows).`
+      : `- THIS RUN (hard requirement): Exactly ${carouselN} row(s) must have "type": "Carousel" and exactly ${posterRemainder} row(s) must have "type": "Poster" (totals must match client.postsPerMonth = ${client.postsPerMonth}).
+- Carousels must use suitable styles: step-by-step, comparisons, Do's & Don'ts, educational breakdowns; use "Poster" for other style intents.`
+    : `- Use carousels ONLY if client.useCarousels = true, and only for: step-by-step, comparisons, Do's & Don'ts, educational breakdowns
+- All others = Poster`;
+
   const system = `You are an expert healthcare Instagram content strategist for a digital marketing agency. You generate monthly content calendars for medical clients.
 
 You MUST follow every rule below exactly. Do not invent rules. Do not summarize these rules elsewhere — they govern your output.
@@ -88,12 +112,26 @@ You MUST follow every rule below exactly. Do not invent rules. Do not summarize 
 POST COUNT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- Generate exactly the number of posts specified in client.postsPerMonth (provided in the user message).
-- User-provided special days count within that total.
-- AI-added awareness days are ADDITIONAL posts beyond the count.
-- Each special day = exactly 1 post. Never split.
+- Output a JSON array whose length is EXACTLY client.postsPerMonth (provided in the user message).
+- The RUN SPECIAL DAYS list (below) reserves specific calendar dates: you MUST include one row per listed date with specialDayLabel matching that label and isAIAdded false. Do not skip any listed date to make room for generic posts.
+- Remaining rows (until the total reaches client.postsPerMonth) are general specialty or awareness content (SP1 / SP2 / AWR as appropriate).
+- Optional invented awareness rows (not listed under RUN SPECIAL DAYS) may use isAIAdded true and code "AWR" only when they do not replace a mandatory listed special day; if space is tight, omit invented extras — never omit a listed special day.
+- Each listed special day = exactly 1 post. Never split.
 - Never repeat the same special day in the same month.
-- Mark AI-added days with "➕ ADDED" in the Code column (set isAIAdded to true for those rows; the Code field itself remains only "SP1", "SP2", or "AWR" — the spreadsheet layer will prepend the marker when isAIAdded is true).
+- For isAIAdded true rows only, the spreadsheet layer will show a marker from your flag (Code stays one of "SP1", "SP2", "AWR").
+${
+  compactCalendar
+    ? `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+HIGH-VOLUME MONTH (${client.postsPerMonth} posts in one JSON array)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Use the SHORTEST copy that still meets clinical and branding rules; the entire array must parse as strict JSON.
+- Prefer shorter sentences, fewer lines in textInImage, and shorter topic strings so all ${client.postsPerMonth} objects fit in one response.
+`
+    : ""
+}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TOPIC RULES
@@ -128,8 +166,7 @@ STYLE DISTRIBUTION for 15 posts:
 POST TYPE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- Use carousels ONLY if client.useCarousels = true, and only for: step-by-step, comparisons, Do's & Don'ts, educational breakdowns
-- All others = Poster
+${postTypeBlock}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 TEXT IN IMAGE rules
@@ -140,18 +177,45 @@ TEXT IN IMAGE rules
 - End with exactly ONE CTA from: "Consult our expert" / "Book an appointment" / "Visit our clinic" / "Meet our specialist"
 - End with [Clinic Name] and [City] on separate lines (replace bracket placeholders with actual clinic name and city from the client profile)
 - Do NOT include doctor name inside image text
+${
+  compactCalendar
+    ? `- This month has many posts: keep textInImage to at most 6 lines total (including CTA, clinic name, and city lines).`
+    : ""
+}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SUPPORTING TEXT rules
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- REQUIRED ORDER inside each "supportingText" value (do not reorder):
-  1) Main body: minimum 15 sentences; clinical depth, patient-friendly tone; naturally include doctor name, clinic name, specialty, topic keyword, city; minimum 7 SEO keywords woven into prose (not as a naked list unless style demands).
-  2) One blank line.
+${
+  compactCalendar
+    ? `- REQUIRED ORDER inside each "supportingText" value (do not reorder):
+  1) Main body: 3 or 4 short sentences only (clinical, patient-friendly; mention doctor name, clinic, specialty, and city compactly). Do not exceed four sentences in the main body.
+  2) One blank line (inside the string as \\n\\n — see VALID JSON below).
   3) If client.supportingTextDefault is non-empty (see CLIENT PROFILE JSON): insert that text VERBATIM here — immediately BEFORE hashtags. Do not paraphrase or omit. If empty, skip this block entirely.
   4) One blank line.
-  5) Hashtag block LAST: minimum 17 hashtags (#...) covering doctor, clinic, city, specialty, awareness, topic hashtags. NOTHING may appear after this hashtag block.
+  5) Hashtag block LAST: exactly 8 hashtags (#...) on one line. NOTHING may appear after this hashtag block.
 - Never place hashtags before supportingTextDefault. Never place supportingTextDefault after hashtags.
+- "topic" field: one line, maximum 120 characters.`
+    : `- REQUIRED ORDER inside each "supportingText" value (do not reorder):
+  1) Main body: minimum 5 sentences, maximum 8 short sentences; clinical depth, patient-friendly tone; naturally include doctor name, clinic name, specialty, topic keyword, city; at least 4 SEO keywords woven into prose (not as a naked list unless style demands). Brevity is mandatory: the entire JSON array for the month must stay well within the output token limit — never write long paragraphs.
+  2) One blank line (inside the string as \\n\\n — see VALID JSON below).
+  3) If client.supportingTextDefault is non-empty (see CLIENT PROFILE JSON): insert that text VERBATIM here — immediately BEFORE hashtags. Do not paraphrase or omit. If empty, skip this block entirely.
+  4) One blank line.
+  5) Hashtag block LAST: minimum 8 hashtags, maximum 14 (#...) covering doctor, clinic, city, specialty, awareness, topic hashtags. NOTHING may appear after this hashtag block.
+- Never place hashtags before supportingTextDefault. Never place supportingTextDefault after hashtags.`
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VALID JSON (mandatory — broken JSON fails the whole job)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Respond with a single JSON array only (see OUTPUT FORMAT). It must parse with JSON.parse.
+- Standard JSON only: double-quoted property names and double-quoted strings. Never use single quotes. Never write TypeScript unions (no |) in the JSON.
+- No trailing commas after the last property in an object or the last item in an array (JSON.parse rejects them).
+- Inside JSON string values (the "textInImage", "supportingText", and "topic" fields, etc.): use \\n for every line break. Never put a raw newline inside a string — that produces "Unterminated string" errors.
+- Escape any literal double quote inside a string as \\".
+- Escape backslashes that should appear in text as \\\\.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DEPARTMENT COLORS
@@ -167,20 +231,23 @@ If the client has only one specialty, use "SP1" for all specialty education post
 OUTPUT FORMAT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Respond ONLY with a valid JSON array. No markdown. No explanation. No backticks.
-Each item must have these exact keys:
-{
-  "date": "DD MMM YYYY",
-  "code": "SP1" | "SP2" | "AWR",
-  "department": string,
-  "type": "Poster" | "Carousel",
-  "style": string,
-  "textInImage": string,
-  "supportingText": string,
-  "isAIAdded": boolean,
-  "specialDayLabel": string | null,
-  "topic": string
-}
+Respond ONLY with a valid JSON array: [ {...}, {...}, ... ]. No markdown fences, no text before or after the array.
+Follow VALID JSON rules: no raw newlines inside strings; use \\n for line breaks inside string values.
+
+Each array element is ONE object with EXACTLY these keys (all required, use this spelling): "date", "code", "department", "type", "style", "textInImage", "supportingText", "isAIAdded", "specialDayLabel", "topic".
+
+Value types (real JSON — not schema shorthand):
+- "date": string, format "DD MMM YYYY" (e.g. "05 June 2026").
+- "code": string, one of "SP1", "SP2", "AWR" only.
+- "department": string.
+- "type": string, one of "Poster", "Carousel" only.
+- "style": string (style name from the list in this prompt).
+- "textInImage", "supportingText", "topic": strings.
+- "isAIAdded": JSON boolean true or false (never quoted).
+- "specialDayLabel": JSON string or JSON null (literal null without quotes when null).
+
+Valid one-row example (structure only — use real client content for every row):
+[{"date":"05 June 2026","code":"SP1","department":"Cardiology","type":"Poster","style":"Short Statement","textInImage":"Heart health matters.\\n\\nBook an appointment\\nSunrise Clinic\\nAustin","supportingText":"Short educational body here.\\n\\n#drsmith #sunriseclinic #austin #hearthealth #cardiology #wellness #screening #prevention","isAIAdded":false,"specialDayLabel":null,"topic":"Routine cardiac screening"}]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STYLE FORMAT TEMPLATES
@@ -272,8 +339,35 @@ TECHDR COMPLIANCE (this client)
       : ""
   }`;
 
-  const user = `TARGET MONTH: ${monthName} ${year}
+  const runConstraintLines: string[] = [];
+  if (carouselCountHard) {
+    if (carouselN === 0) {
+      runConstraintLines.push('ALL rows in this JSON must use "type":"Poster" only.');
+    } else {
+      runConstraintLines.push(
+        `Exactly ${carouselN} row(s) must use "type":"Carousel" and exactly ${posterRemainder} row(s) must use "type":"Poster" (total ${client.postsPerMonth}). Wrong counts invalidate the output.`
+      );
+    }
+  }
+  if (specialDays.length > 0) {
+    runConstraintLines.push(
+      `There are ${specialDays.length} mandatory special-day slot(s) in RUN SPECIAL DAYS — each MUST appear as one row on that calendar date with matching specialDayLabel and isAIAdded false.`
+    );
+  }
+  const runConstraintsBlock =
+    runConstraintLines.length > 0
+      ? `
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+THIS RUN — HARD CONSTRAINTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${runConstraintLines.map((l) => `- ${l}`).join("\n")}
+`
+      : "";
+
+  const user = `TARGET MONTH: ${monthName} ${year}
+${runConstraintsBlock}
 CLIENT PROFILE (JSON):
 ${JSON.stringify(
     {
@@ -286,6 +380,7 @@ ${JSON.stringify(
       brandType: client.brandType,
       postsPerMonth: client.postsPerMonth,
       useCarousels: client.useCarousels,
+      ...(carouselCountHard ? { carouselCountForRun: carouselN } : {}),
       notes: client.notes,
       supportingTextDefault: client.supportingTextDefault,
     },
@@ -293,7 +388,7 @@ ${JSON.stringify(
     2
   )}
 
-USER-DEFINED SPECIAL DAYS FOR THIS MONTH (each consumes one slot within the monthly post count; do not duplicate):
+RUN SPECIAL DAYS FOR THIS MONTH (mandatory coverage — includes the client’s saved dates for this month plus any extra dates passed for this run; do not duplicate):
 ${specialDaysBlock}
 
 FULL 6-MONTH TOPIC HISTORY (audit every topic; never repeat any topic string/idea already used):
@@ -305,8 +400,8 @@ DEPARTMENT NAMING:
 - For AWR rows, set "department" to "Awareness / Festival" or the specific campaign/awareness name.
 
 SPECIAL DAY FIELDS:
-- For posts tied to a user special day, set specialDayLabel to that day's label and isAIAdded to false.
-- For AI-added awareness/festival posts beyond the monthly count, set isAIAdded to true, code to "AWR", and specialDayLabel to a short label of the awareness/festival.
+- For every date listed in RUN SPECIAL DAYS, set specialDayLabel to that row’s label and isAIAdded to false (even if the day came from an AI suggestion in the app UI).
+- For optional invented awareness not listed above, set isAIAdded to true, code to "AWR", and specialDayLabel to a short label of the awareness/festival.
 
 TOPIC FIELD:
 - "topic" must be unique vs the topic history list above and highly specialty-specific.

@@ -57,6 +57,7 @@ async function main(): Promise<void> {
       city: "Hyderabad",
       brandType: "clinic",
       postsPerMonth: 15,
+      carouselsPerMonth: 3,
       useCarousels: true,
       notes: "Focus on empathetic tone and evidence-based education.",
       specialDays: {

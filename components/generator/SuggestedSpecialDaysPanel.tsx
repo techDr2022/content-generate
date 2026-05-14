@@ -18,6 +18,14 @@ const MONTH_NAMES = [
   "December",
 ];
 
+function formatSavedAt(ms: number): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(ms));
+  } catch {
+    return new Date(ms).toISOString();
+  }
+}
+
 interface SuggestedSpecialDaysPanelProps {
   specialties: string[];
   month: number;
@@ -25,10 +33,13 @@ interface SuggestedSpecialDaysPanelProps {
   disabled: boolean;
   loading: boolean;
   error: string | null;
+  listSource: null | "cache" | "api";
+  cacheSavedAt: number | null;
   rows: RunSpecialDay[];
   selected: boolean[];
   onToggle: (index: number, checked: boolean) => void;
   onSuggest: () => void;
+  onRefreshFromAi: () => void;
 }
 
 export function SuggestedSpecialDaysPanel({
@@ -38,10 +49,13 @@ export function SuggestedSpecialDaysPanel({
   disabled,
   loading,
   error,
+  listSource,
+  cacheSavedAt,
   rows,
   selected,
   onToggle,
   onSuggest,
+  onRefreshFromAi,
 }: SuggestedSpecialDaysPanelProps) {
   const monthLabel = `${MONTH_NAMES[month - 1] ?? month} ${year}`;
 
@@ -58,8 +72,20 @@ export function SuggestedSpecialDaysPanel({
           </Label>
           <p className="mt-1 text-xs text-muted-foreground">
             Suggestions match this client’s specialties ({specialties.length ? specialties.join(", ") : "—"}) plus suitable broad health observances.
-            Generated for <span className="font-medium text-foreground">{monthLabel}</span> (first selected month). Uncheck any day you don’t want in this calendar run.
+            Generated for <span className="font-medium text-foreground">{monthLabel}</span> (first selected month). Uncheck any day you don’t want in this calendar run. Lists for the{" "}
+            <strong>same specialties + month</strong> are reused from this browser for about 90 days so Claude is not called every time.
           </p>
+          {listSource === "cache" && rows.length > 0 ? (
+            <p className="mt-2 text-xs font-medium text-emerald-900 dark:text-emerald-100/95">
+              Loaded from saved suggestions in this browser
+              {cacheSavedAt != null ? ` · ${formatSavedAt(cacheSavedAt)}` : ""}. Use <strong>Refresh from AI</strong> to fetch a new list (uses the API).
+            </p>
+          ) : null}
+          {listSource === "api" && rows.length > 0 ? (
+            <p className="mt-2 text-xs text-emerald-900/85 dark:text-emerald-100/85">
+              Latest list came from Claude and was saved here for this specialty mix and month.
+            </p>
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           <Button
@@ -87,6 +113,15 @@ export function SuggestedSpecialDaysPanel({
           <Button type="button" size="sm" disabled={disabled || loading} onClick={onSuggest}>
             {loading ? "Generating…" : "Suggest days"}
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={disabled || loading}
+            onClick={onRefreshFromAi}
+          >
+            {loading ? "…" : "Refresh from AI"}
+          </Button>
         </div>
       </div>
 
@@ -96,7 +131,14 @@ export function SuggestedSpecialDaysPanel({
 
       {rows.length === 0 && !loading ? (
         <p className="text-sm text-muted-foreground">
-          Click <strong>Suggest days</strong> to load awareness / campaign dates for {monthLabel}.
+          {disabled ? (
+            <>Choose a client with at least one specialty to load or generate suggestions.</>
+          ) : (
+            <>
+              Click <strong>Suggest days</strong> to load this month (from your browser cache when available, otherwise Claude). Use{" "}
+              <strong>Refresh from AI</strong> when you already have a list and want a brand-new suggestion set.
+            </>
+          )}
         </p>
       ) : null}
 

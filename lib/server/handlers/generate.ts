@@ -17,6 +17,7 @@ const singleSchema = z.object({
   month: z.number().int().min(1).max(12),
   year: z.number().int().min(2020).max(2100),
   postCountOverride: z.number().int().min(1).max(62).optional(),
+  carouselCountOverride: z.number().int().min(0).max(62).optional(),
   extraSpecialDays: z.array(specialDayRunSchema).optional(),
 });
 
@@ -26,11 +27,19 @@ const bulkSchema = z.object({
 
 function optionalEnqueuePayload(body: {
   postCountOverride?: number;
+  carouselCountOverride?: number;
   extraSpecialDays?: z.infer<typeof specialDayRunSchema>[];
 }): Record<string, unknown> | undefined {
-  if (body.postCountOverride === undefined && body.extraSpecialDays === undefined) return undefined;
+  if (
+    body.postCountOverride === undefined &&
+    body.carouselCountOverride === undefined &&
+    body.extraSpecialDays === undefined
+  ) {
+    return undefined;
+  }
   return {
     ...(body.postCountOverride !== undefined ? { postCountOverride: body.postCountOverride } : {}),
+    ...(body.carouselCountOverride !== undefined ? { carouselCountOverride: body.carouselCountOverride } : {}),
     ...(body.extraSpecialDays !== undefined ? { extraSpecialDays: body.extraSpecialDays } : {}),
   };
 }
@@ -71,6 +80,7 @@ export async function enqueueGenerate(userId: string, body: unknown) {
     year: parsed.year,
     userId,
     postCountOverride: parsed.postCountOverride,
+    carouselCountOverride: parsed.carouselCountOverride,
     extraSpecialDays: parsed.extraSpecialDays,
   };
 
@@ -145,6 +155,7 @@ export async function enqueueBulkGenerate(userId: string, body: unknown) {
       year: item.year,
       userId,
       postCountOverride: item.postCountOverride,
+      carouselCountOverride: item.carouselCountOverride,
       extraSpecialDays: item.extraSpecialDays,
     };
     try {
@@ -202,13 +213,27 @@ export async function suggestSpecialDays(userId: string, body: unknown) {
   }
 
   const { suggestSpecialDaysWithClaude } = await import("@/lib/server/services/suggestSpecialDaysService");
-  const data = await suggestSpecialDaysWithClaude({
-    specialties: client.specialty,
-    clinicName: client.clinicName,
-    city: client.city,
-    month: parsed.month,
-    year: parsed.year,
-  });
+  try {
+    const data = await suggestSpecialDaysWithClaude({
+      specialties: client.specialty,
+      clinicName: client.clinicName,
+      city: client.city,
+      month: parsed.month,
+      year: parsed.year,
+    });
 
-  return { success: true as const, data };
+    return { success: true as const, data };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("ANTHROPIC_API_KEY")) {
+      throw new HttpError(503, msg);
+    }
+    if (/529|overloaded|Overloaded|rate_limit|429/i.test(msg)) {
+      throw new HttpError(
+        503,
+        "Anthropic is temporarily overloaded or rate-limited. Wait 30–60 seconds and try Suggest days again."
+      );
+    }
+    throw new HttpError(502, `Could not suggest special days: ${msg}`);
+  }
 }

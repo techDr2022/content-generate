@@ -17,10 +17,15 @@ interface GeneratorFormProps {
   onMonthsChange: (m: number[]) => void;
   postOverride?: number;
   onPostOverrideChange: (v: number | undefined) => void;
+  carouselOverride?: number;
+  onCarouselOverrideChange: (v: number | undefined) => void;
+  clientUseCarousels?: boolean;
   extraSpecialDays: RunSpecialDay[];
   onExtraSpecialDaysChange: (rows: RunSpecialDay[]) => void;
   /** Selected client’s saved default for helper text */
   clientDefaultPosts?: number;
+  /** Fixed carousel rows saved on the client (subset of monthly rows). */
+  clientDefaultCarousels?: number;
   clientLabel?: string;
   clientSpecialties?: string[];
   /** First selected month (for AI suggestions) */
@@ -30,10 +35,16 @@ interface GeneratorFormProps {
   aiSuggestedSelected?: boolean[];
   onAiSuggestedToggle?: (index: number, checked: boolean) => void;
   onSuggestSpecialDays?: () => void;
+  /** Bypass browser cache and call Claude again. */
+  onSuggestSpecialDaysForceApi?: () => void;
+  suggestListSource?: null | "cache" | "api";
+  suggestCacheSavedAt?: number | null;
   suggestSpecialDaysLoading?: boolean;
   suggestSpecialDaysError?: string | null;
   /** When false, hide AI suggestion panel */
   showSuggestedSpecialDays?: boolean;
+  /** Minimum rows needed for selected special days + carousel count (parent-computed). */
+  minRowsFromSelections?: number;
 }
 
 export function GeneratorForm({
@@ -46,9 +57,13 @@ export function GeneratorForm({
   onMonthsChange,
   postOverride,
   onPostOverrideChange,
+  carouselOverride,
+  onCarouselOverrideChange,
+  clientUseCarousels,
   extraSpecialDays,
   onExtraSpecialDaysChange,
   clientDefaultPosts,
+  clientDefaultCarousels,
   clientLabel,
   clientSpecialties,
   suggestionMonth,
@@ -57,9 +72,13 @@ export function GeneratorForm({
   aiSuggestedSelected,
   onAiSuggestedToggle,
   onSuggestSpecialDays,
+  onSuggestSpecialDaysForceApi,
+  suggestListSource,
+  suggestCacheSavedAt,
   suggestSpecialDaysLoading,
   suggestSpecialDaysError,
   showSuggestedSpecialDays = true,
+  minRowsFromSelections,
 }: GeneratorFormProps) {
   return (
     <div className="space-y-6">
@@ -98,13 +117,19 @@ export function GeneratorForm({
         value={postOverride}
         onChange={onPostOverrideChange}
         clientDefaultPosts={clientDefaultPosts}
+        clientDefaultCarousels={clientDefaultCarousels}
         clientLabel={clientLabel}
+        clientUseCarousels={clientUseCarousels}
+        carouselValue={carouselOverride}
+        onCarouselChange={onCarouselOverrideChange}
+        minRowsFromSelections={minRowsFromSelections}
       />
       {showSuggestedSpecialDays &&
       suggestionMonth != null &&
       suggestionYear != null &&
       clientSpecialties &&
       onSuggestSpecialDays &&
+      onSuggestSpecialDaysForceApi &&
       onAiSuggestedToggle ? (
         <SuggestedSpecialDaysPanel
           specialties={clientSpecialties}
@@ -113,10 +138,13 @@ export function GeneratorForm({
           disabled={!clientId || clientSpecialties.length === 0}
           loading={Boolean(suggestSpecialDaysLoading)}
           error={suggestSpecialDaysError ?? null}
+          listSource={suggestListSource ?? null}
+          cacheSavedAt={suggestCacheSavedAt ?? null}
           rows={aiSuggestedDays ?? []}
           selected={aiSuggestedSelected ?? []}
           onToggle={onAiSuggestedToggle}
           onSuggest={onSuggestSpecialDays}
+          onRefreshFromAi={onSuggestSpecialDaysForceApi}
         />
       ) : null}
       <SpecialDaysInput value={extraSpecialDays} onChange={onExtraSpecialDaysChange} />

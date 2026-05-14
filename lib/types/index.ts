@@ -3,3 +3,7 @@ export * from "./specialtyServices";
 export * from "./calendar";
 export * from "./job";
 export * from "./posterLook";
+export * from "./posterImageSize";
+export * from "./posterImageOutput";
+export * from "./posterBrandAssets";
+export * from "./newsSuggestions";

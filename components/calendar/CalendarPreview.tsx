@@ -1,5 +1,12 @@
 import { useState } from "react";
-import type { CalendarPost, PosterLookId } from "@/lib/types";
+import {
+  defaultPosterBrandAssetsState,
+  defaultPosterImageOutputState,
+  type CalendarPost,
+  type PosterBrandAssetsState,
+  type PosterImageOutputState,
+  type PosterLookId,
+} from "@/lib/types";
 import { Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +15,8 @@ import { CalendarTable } from "./CalendarTable";
 import { PosterImageDialog } from "./PosterImageDialog";
 import { PosterImagesActionsCard } from "./PosterImagesActionsCard";
 import { usePosterImageFlow } from "@/hooks/usePosterImageFlow";
+import { PosterBrandAssetsControls } from "./PosterBrandAssetsControls";
+import { PosterImageOutputControls } from "./PosterImageOutputControls";
 import { PosterLookControls } from "./PosterLookControls";
 
 interface CalendarPreviewProps {
@@ -18,7 +27,9 @@ export function CalendarPreview({ rows }: CalendarPreviewProps) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [posterLook, setPosterLook] = useState<PosterLookId>("text_only");
   const [posterLookCustom, setPosterLookCustom] = useState("");
-  const poster = usePosterImageFlow({ posterLook, posterLookCustom });
+  const [imageOutput, setImageOutput] = useState<PosterImageOutputState>(() => defaultPosterImageOutputState());
+  const [brandAssets, setBrandAssets] = useState<PosterBrandAssetsState>(() => defaultPosterBrandAssetsState());
+  const poster = usePosterImageFlow({ posterLook, posterLookCustom, imageOutput, brandAssets });
   const posterGenerateBlocked = posterLook === "custom" && posterLookCustom.trim().length === 0;
 
   async function handleCopySheet(): Promise<void> {
@@ -64,12 +75,27 @@ export function CalendarPreview({ rows }: CalendarPreviewProps) {
         </CardHeader>
         {rows.length > 0 ? (
           <div className="border-b bg-muted/15 px-6 py-4">
-            <PosterLookControls
-              posterLook={posterLook}
-              onPosterLookChange={setPosterLook}
-              posterLookCustom={posterLookCustom}
-              onPosterLookCustomChange={setPosterLookCustom}
-            />
+            <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+              <div className="space-y-4">
+                <PosterLookControls
+                  posterLook={posterLook}
+                  onPosterLookChange={setPosterLook}
+                  posterLookCustom={posterLookCustom}
+                  onPosterLookCustomChange={setPosterLookCustom}
+                />
+                <PosterBrandAssetsControls
+                  value={brandAssets}
+                  onChange={(patch) => setBrandAssets((prev) => ({ ...prev, ...patch }))}
+                />
+              </div>
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-foreground">Customize image output</p>
+                <PosterImageOutputControls
+                  value={imageOutput}
+                  onChange={(patch) => setImageOutput((prev) => ({ ...prev, ...patch }))}
+                />
+              </div>
+            </div>
           </div>
         ) : null}
         <CardContent className="max-h-[480px] overflow-auto">

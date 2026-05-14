@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { CalendarPost, PosterLookId } from "@/lib/types";
+import { posterBrandPayloadFromState, type CalendarPost, type PosterBrandAssetsState, type PosterImageOutputState, type PosterLookId } from "@/lib/types";
 import { useGeneratePosterImage } from "@/hooks/useGenerator";
 
 export function posterRowKey(post: CalendarPost, index: number): string {
@@ -9,10 +9,12 @@ export function posterRowKey(post: CalendarPost, index: number): string {
 export interface PosterImageFlowOptions {
   posterLook: PosterLookId;
   posterLookCustom: string;
+  imageOutput: PosterImageOutputState;
+  brandAssets: PosterBrandAssetsState;
 }
 
 export function usePosterImageFlow(opts: PosterImageFlowOptions) {
-  const { posterLook, posterLookCustom } = opts;
+  const { posterLook, posterLookCustom, imageOutput, brandAssets } = opts;
   const generateImage = useGeneratePosterImage();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -41,6 +43,8 @@ export function usePosterImageFlow(opts: PosterImageFlowOptions) {
           textInImage: text,
           posterLook,
           posterLookCustom: posterLook === "custom" ? posterLookCustom.trim() : undefined,
+          ...imageOutput,
+          ...posterBrandPayloadFromState(brandAssets),
         });
         const src = `data:${data.mimeType};base64,${data.imageBase64}`;
         setPreviewSrc(src);
@@ -51,7 +55,7 @@ export function usePosterImageFlow(opts: PosterImageFlowOptions) {
         setLoadingKey(null);
       }
     },
-    [generateImage, posterLook, posterLookCustom]
+    [brandAssets, generateImage, imageOutput, posterLook, posterLookCustom]
   );
 
   const showLoading = generateImage.isPending && !previewSrc && !dialogError;

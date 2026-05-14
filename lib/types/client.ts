@@ -98,6 +98,8 @@ export interface ClientDTO {
   city: string;
   brandType: BrandType;
   postsPerMonth: number;
+  /** Fixed Carousel rows within postsPerMonth (omit or 0 = none fixed). */
+  carouselsPerMonth?: number;
   useCarousels: boolean;
   notes: string | null;
   /** If set, generation inserts this verbatim immediately before the hashtag block in supporting text. */

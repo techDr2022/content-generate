@@ -11,8 +11,9 @@ function assertS3CredentialsReady(): void {
   const ak = process.env.AWS_ACCESS_KEY_ID?.trim() ?? "";
   const sk = process.env.AWS_SECRET_ACCESS_KEY?.trim() ?? "";
   if (!ak || !sk) {
+    const missing = [!ak && "AWS_ACCESS_KEY_ID", !sk && "AWS_SECRET_ACCESS_KEY"].filter(Boolean).join(" and ");
     throw new Error(
-      "STORAGE_TYPE=S3 requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY. For local dev without object storage, set STORAGE_TYPE=LOCAL."
+      `STORAGE_TYPE=S3 requires both credentials; missing ${missing}. R2 tokens list Access Key ID + Secret. For laptop-only dev, set STORAGE_TYPE=LOCAL.`
     );
   }
   const looksPlaceholder =

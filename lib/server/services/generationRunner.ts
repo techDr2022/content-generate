@@ -38,6 +38,18 @@ function isDateInMonth(dateStr: string, month: number, year: number): boolean {
   return dateStr.startsWith(m);
 }
 
+/** One row per calendar date; later entries win (run extras override client profile). */
+function mergeSpecialDaysByDate(db: SpecialDayInput[], extra: SpecialDayInput[]): SpecialDayInput[] {
+  const map = new Map<string, SpecialDayInput>();
+  for (const s of db) {
+    if (s.date && s.label) map.set(s.date, s);
+  }
+  for (const s of extra) {
+    if (s.date && s.label) map.set(s.date, s);
+  }
+  return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
 const CANCEL_ERR = "JOB_CANCELLED";
 
 export function isCancelledMessage(message: string): boolean {
@@ -96,7 +108,7 @@ export async function executeGenerationJob(
   data: GenerateJobPayload,
   progress: GenerationProgress
 ): Promise<{ fileUrl: string }> {
-  const { jobId, clientId, month, year, userId, postCountOverride, extraSpecialDays } = data;
+  const { jobId, clientId, month, year, userId, postCountOverride, carouselCountOverride, extraSpecialDays } = data;
   const runStarted = Date.now();
 
   try {
@@ -156,19 +168,48 @@ export async function executeGenerationJob(
         type: s.type as SpecialDayInput["type"],
       }));
 
-    const mergedSpecials: SpecialDayInput[] = [
-      ...dbSpecials,
-      ...(extraSpecialDays ?? []).map((s) => ({
-        label: s.label,
+    const extraMapped: SpecialDayInput[] = (extraSpecialDays ?? [])
+      .filter((s) => {
+        const label = typeof s.label === "string" ? s.label.trim() : "";
+        return label.length > 0 && typeof s.date === "string" && isDateInMonth(s.date, month, year);
+      })
+      .map((s) => ({
+        label: s.label.trim(),
         date: s.date,
         type: s.type as SpecialDayInput["type"],
-      })),
-    ];
+      }));
+    const mergedSpecials = mergeSpecialDaysByDate(dbSpecials, extraMapped);
 
-    const effectivePosts =
+    const basePosts =
       typeof postCountOverride === "number" && postCountOverride > 0
         ? postCountOverride
         : client.postsPerMonth;
+    /** Each listed special day needs its own post; cap was impossible for Claude when specials > monthly target. */
+    const effectivePosts = Math.max(basePosts, mergedSpecials.length);
+
+    if (effectivePosts > basePosts) {
+      logger.info("Raised effective post count to fit user special days", {
+        jobId,
+        basePosts,
+        effectivePosts,
+        specialDayCount: mergedSpecials.length,
+      });
+      await prisma.generationJob
+        .update({
+          where: { id: jobId },
+          data: { postCount: effectivePosts },
+        })
+        .catch(() => undefined);
+    }
+
+    const carouselRaw =
+      typeof carouselCountOverride === "number" && Number.isFinite(carouselCountOverride)
+        ? Math.round(carouselCountOverride)
+        : typeof client.carouselsPerMonth === "number" && client.carouselsPerMonth > 0
+          ? Math.round(client.carouselsPerMonth)
+          : undefined;
+    const carouselForRun =
+      carouselRaw !== undefined ? Math.min(Math.max(0, carouselRaw), effectivePosts) : undefined;
 
     const profile = {
       name: client.name,
@@ -179,12 +220,21 @@ export async function executeGenerationJob(
       city: client.city,
       brandType: client.brandType,
       postsPerMonth: effectivePosts,
-      useCarousels: client.useCarousels,
+      useCarousels: carouselForRun !== undefined ? carouselForRun > 0 : client.useCarousels,
+      carouselCountForRun: carouselForRun,
       notes: client.notes,
       supportingTextDefault: client.supportingTextDefault ?? null,
     };
 
     const { system, user } = buildPrompt(profile, month, year, mergedSpecials, topicHistory);
+
+    logger.info("Generation prompt context", {
+      jobId,
+      effectivePosts,
+      mergedSpecialDayCount: mergedSpecials.length,
+      carouselCountOverride: data.carouselCountOverride,
+      carouselForRun,
+    });
 
     await progress.updateProgress({ step: "prompt_sent", pct: 10 });
     await throwIfCancelled(jobId);
@@ -329,6 +379,7 @@ export async function executeGenerationJob(
 export function generationJobRowToPayload(row: GenerationJob): GenerateJobPayload {
   const p = row.payload as {
     postCountOverride?: number;
+    carouselCountOverride?: number;
     extraSpecialDays?: GenerateJobPayload["extraSpecialDays"];
   } | null;
   return {
@@ -338,6 +389,7 @@ export function generationJobRowToPayload(row: GenerationJob): GenerateJobPayloa
     year: row.year,
     userId: row.userId,
     postCountOverride: p?.postCountOverride,
+    carouselCountOverride: p?.carouselCountOverride,
     extraSpecialDays: p?.extraSpecialDays,
   };
 }

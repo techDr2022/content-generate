@@ -1,13 +1,13 @@
 # Healthcare Social Media Content Calendar Generator
 
-Internal monorepo for generating Instagram-ready monthly calendars for healthcare clients, backed by Claude Haiku, BullMQ, and ExcelJS.
+Internal monorepo for generating Instagram-ready monthly calendars for healthcare clients, backed by Claude (default Sonnet 4.6), BullMQ, and ExcelJS.
 
 ## Prerequisites
 
 - Node.js 20+
 - PostgreSQL 15+
 - Redis 7+
-- Anthropic API key; generation defaults to **`claude-haiku-4-5`** (override with `ANTHROPIC_MODEL`, e.g. `claude-sonnet-4-5` for higher quality)
+- Anthropic API key; generation defaults to **`claude-sonnet-4-6`** (override with `ANTHROPIC_MODEL`, e.g. `claude-haiku-4-5` for lower cost)
 
 ## Install
 

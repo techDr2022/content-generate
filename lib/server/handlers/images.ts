@@ -1,16 +1,53 @@
 import { z } from "zod";
-import type { PosterLookId } from "@/lib/types";
-import { POSTER_LOOK_IDS } from "@/lib/types";
+import type {
+  PosterImageBackgroundId,
+  PosterImageFormatId,
+  PosterImageQualityId,
+  PosterImageSizeId,
+  PosterLookId,
+} from "@/lib/types";
+import {
+  POSTER_BRAND_IMAGE_MAX_CHARS,
+  POSTER_CONTACT_DETAILS_MAX_CHARS,
+  POSTER_IMAGE_BACKGROUND_IDS,
+  POSTER_IMAGE_FORMAT_IDS,
+  POSTER_IMAGE_QUALITY_IDS,
+  POSTER_IMAGE_SIZE_IDS,
+  POSTER_LOOK_IDS,
+} from "@/lib/types";
 import { HttpError } from "@/lib/server/http";
+import { assertPosterBrandAssetsValid } from "@/lib/server/posterBrandAssetsValidate";
 import { generatePosterImageFromText } from "@/lib/server/services/openaiImageService";
 
 const posterLookSchema = z.enum(POSTER_LOOK_IDS as unknown as [PosterLookId, ...PosterLookId[]]);
+const posterImageSizeSchema = z.enum(
+  POSTER_IMAGE_SIZE_IDS as unknown as [PosterImageSizeId, ...PosterImageSizeId[]]
+);
+const posterImageQualitySchema = z.enum(
+  POSTER_IMAGE_QUALITY_IDS as unknown as [PosterImageQualityId, ...PosterImageQualityId[]]
+);
+const posterImageFormatSchema = z.enum(
+  POSTER_IMAGE_FORMAT_IDS as unknown as [PosterImageFormatId, ...PosterImageFormatId[]]
+);
+const posterImageBackgroundSchema = z.enum(
+  POSTER_IMAGE_BACKGROUND_IDS as unknown as [PosterImageBackgroundId, ...PosterImageBackgroundId[]]
+);
 
 const generateBodySchema = z
   .object({
     textInImage: z.string().min(1, "textInImage is required").max(12000),
     posterLook: posterLookSchema,
     posterLookCustom: z.string().max(500).optional(),
+    imageSize: posterImageSizeSchema.optional(),
+    imageQuality: posterImageQualitySchema.optional(),
+    outputFormat: posterImageFormatSchema.optional(),
+    outputCompression: z.number().int().min(0).max(100).optional(),
+    background: posterImageBackgroundSchema.optional(),
+    contactDetails: z.string().max(POSTER_CONTACT_DETAILS_MAX_CHARS).optional(),
+    logoBase64: z.string().max(POSTER_BRAND_IMAGE_MAX_CHARS).optional(),
+    logoMimeType: z.string().max(80).optional(),
+    doctorPhotoBase64: z.string().max(POSTER_BRAND_IMAGE_MAX_CHARS).optional(),
+    doctorPhotoMimeType: z.string().max(80).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.posterLook === "custom") {
@@ -32,11 +69,33 @@ export async function generateImageFromCalendarText(body: unknown) {
     throw new HttpError(400, first?.message ?? "Invalid request body");
   }
 
+  let brandFields: ReturnType<typeof assertPosterBrandAssetsValid>;
+  try {
+    brandFields = assertPosterBrandAssetsValid({
+      logoBase64: parsed.data.logoBase64,
+      logoMimeType: parsed.data.logoMimeType,
+      doctorPhotoBase64: parsed.data.doctorPhotoBase64,
+      doctorPhotoMimeType: parsed.data.doctorPhotoMimeType,
+    });
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(400, e instanceof Error ? e.message : "Invalid brand assets");
+  }
+
+  const contactTrimmed = parsed.data.contactDetails?.trim();
+
   try {
     const out = await generatePosterImageFromText({
       textInImage: parsed.data.textInImage,
       posterLook: parsed.data.posterLook,
       posterLookCustom: parsed.data.posterLookCustom,
+      imageSize: parsed.data.imageSize,
+      imageQuality: parsed.data.imageQuality,
+      outputFormat: parsed.data.outputFormat,
+      outputCompression: parsed.data.outputCompression,
+      background: parsed.data.background,
+      ...(contactTrimmed ? { contactDetails: contactTrimmed } : {}),
+      ...brandFields,
     });
     return {
       success: true as const,

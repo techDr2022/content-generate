@@ -38,5 +38,7 @@ export interface GenerateJobPayload {
   year: number;
   userId: string;
   postCountOverride?: number;
+  /** When set (0–62), this run must contain exactly this many `Carousel` rows; remainder are `Poster`. Clamped server-side to total posts. */
+  carouselCountOverride?: number;
   extraSpecialDays?: { label: string; date: string; type: string }[];
 }

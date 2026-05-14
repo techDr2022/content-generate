@@ -31,6 +31,13 @@ function normalizePostsPerMonth(val: unknown): unknown {
   return Math.min(62, Math.floor(n));
 }
 
+function normalizeCarouselsPerMonth(val: unknown): unknown {
+  if (val === undefined || val === null) return undefined;
+  const n = typeof val === "string" ? Number(val) : Number(val);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(62, Math.floor(n));
+}
+
 const clientBody = z.object({
   name: z.string().min(1),
   doctorName: z.string().min(1),
@@ -58,6 +65,7 @@ const clientBody = z.object({
   city: z.string().min(1),
   brandType: z.enum(["clinic", "personal", "hospital"]),
   postsPerMonth: z.preprocess(normalizePostsPerMonth, z.number().int().min(1).max(62).optional()),
+  carouselsPerMonth: z.preprocess(normalizeCarouselsPerMonth, z.number().int().min(0).max(62).optional()),
   useCarousels: z.boolean().optional(),
   notes: z.string().nullable().optional(),
   supportingTextDefault: z.string().max(8000).nullable().optional(),
@@ -70,6 +78,12 @@ function assertServicesValid(services: string[], specialty: string[]): void {
       400,
       "Invalid services: use catalog checkboxes and/or custom lines (2–120 chars). Max 40 entries. Custom lines must not use angle brackets or braces."
     );
+  }
+}
+
+function assertCadence(postsPerMonth: number, carouselsPerMonth: number): void {
+  if (carouselsPerMonth > postsPerMonth) {
+    throw new HttpError(400, "Carousels for month cannot exceed posts per month.");
   }
 }
 
@@ -114,6 +128,9 @@ export async function getClient(userId: string, id: string) {
 export async function createClient(userId: string, body: unknown) {
   const parsed = clientBody.parse(body);
   assertServicesValid(parsed.services, parsed.specialty);
+  const postsPerMonth = parsed.postsPerMonth ?? 15;
+  const carouselsPerMonth = parsed.carouselsPerMonth ?? 0;
+  assertCadence(postsPerMonth, carouselsPerMonth);
   const client = await prisma.client.create({
     data: {
       name: parsed.name,
@@ -123,8 +140,9 @@ export async function createClient(userId: string, body: unknown) {
       clinicName: parsed.clinicName,
       city: parsed.city,
       brandType: parsed.brandType,
-      postsPerMonth: parsed.postsPerMonth ?? 15,
-      useCarousels: parsed.useCarousels ?? false,
+      postsPerMonth,
+      carouselsPerMonth,
+      useCarousels: (parsed.useCarousels ?? false) || carouselsPerMonth > 0,
       notes: parsed.notes ?? null,
       supportingTextDefault: parsed.supportingTextDefault ?? null,
       userId,
@@ -156,6 +174,10 @@ export async function updateClient(userId: string, id: string, body: unknown) {
   const mergedServices = parsed.services === undefined ? existing.services : parsed.services;
   assertServicesValid(mergedServices, mergedSpecialty);
 
+  const nextPosts = parsed.postsPerMonth ?? existing.postsPerMonth;
+  const nextCarousels = parsed.carouselsPerMonth ?? existing.carouselsPerMonth;
+  assertCadence(nextPosts, nextCarousels);
+
   if (parsed.specialDays) {
     await prisma.specialDay.deleteMany({ where: { clientId: existing.id } });
   }
@@ -171,6 +193,7 @@ export async function updateClient(userId: string, id: string, body: unknown) {
       city: parsed.city ?? existing.city,
       brandType: parsed.brandType ?? existing.brandType,
       postsPerMonth: parsed.postsPerMonth ?? existing.postsPerMonth,
+      carouselsPerMonth: parsed.carouselsPerMonth ?? existing.carouselsPerMonth,
       useCarousels: parsed.useCarousels ?? existing.useCarousels,
       notes: parsed.notes === undefined ? existing.notes : parsed.notes,
       supportingTextDefault:

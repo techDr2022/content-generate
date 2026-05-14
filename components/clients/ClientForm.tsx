@@ -32,6 +32,8 @@ export interface ClientFormValues {
   services: string[];
   brandType: "clinic" | "personal" | "hospital";
   postsPerMonth: number;
+  /** Carousel-type rows within postsPerMonth (0 = no fixed count on the profile). */
+  carouselsPerMonth: number;
   useCarousels: boolean;
   notes: string;
   /** Verbatim block placed before hashtags in generated supporting text */
@@ -49,6 +51,11 @@ function sanitizeServicesForSpecialties(services: string[], specialty: string[])
 function clampPostsPerMonthState(n: number): number {
   if (!Number.isFinite(n) || n < 1) return 15;
   return Math.min(62, Math.floor(n));
+}
+
+function clampCarouselsState(carousels: number, postsPerMonth: number): number {
+  if (!Number.isFinite(carousels) || carousels < 0) return 0;
+  return Math.min(62, postsPerMonth, Math.floor(carousels));
 }
 
 interface ClientFormProps {
@@ -71,6 +78,7 @@ function mapInitial(client: ClientDTO | null | undefined): ClientFormValues {
       services: [],
       brandType: "clinic",
       postsPerMonth: 15,
+      carouselsPerMonth: 0,
       useCarousels: false,
       notes: "",
       supportingTextDefault: "",
@@ -86,6 +94,7 @@ function mapInitial(client: ClientDTO | null | undefined): ClientFormValues {
     services: sanitizeServicesForSpecialties([...(client.services ?? [])], client.specialty),
     brandType: client.brandType as ClientFormValues["brandType"],
     postsPerMonth: clampPostsPerMonthState(client.postsPerMonth),
+    carouselsPerMonth: clampCarouselsState(client.carouselsPerMonth ?? 0, clampPostsPerMonthState(client.postsPerMonth)),
     useCarousels: client.useCarousels,
     notes: client.notes ?? "",
     supportingTextDefault: client.supportingTextDefault ?? "",
@@ -284,6 +293,100 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
         <div>
           <Label htmlFor="city">City</Label>
           <Input id="city" value={values.city} onChange={(e) => setValues({ ...values, city: e.target.value })} required />
+        </div>
+      </div>
+
+      <div className="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-4">
+        <div>
+          <p className="text-sm font-medium text-foreground">Monthly calendar cadence</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Total rows per month and how many use multi-slide Carousels. The generator uses these unless you set a
+            one-off override on the Generator page.
+          </p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <Label htmlFor="ppm">Posts per month</Label>
+            <Input
+              id="ppm"
+              type="number"
+              inputMode="numeric"
+              className="mt-1"
+              value={values.postsPerMonth}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === "") {
+                  setValues({ ...values, postsPerMonth: 15 });
+                  return;
+                }
+                const n = Number(raw);
+                if (!Number.isFinite(n)) return;
+                const posts = clampPostsPerMonthState(n);
+                setValues({
+                  ...values,
+                  postsPerMonth: posts,
+                  carouselsPerMonth: clampCarouselsState(values.carouselsPerMonth, posts),
+                });
+              }}
+              onBlur={() =>
+                setValues((v) => {
+                  const posts = clampPostsPerMonthState(v.postsPerMonth);
+                  return {
+                    ...v,
+                    postsPerMonth: posts,
+                    carouselsPerMonth: clampCarouselsState(v.carouselsPerMonth, posts),
+                  };
+                })
+              }
+            />
+            <p className="mt-1 text-xs text-muted-foreground">Total calendar rows (posters + carousels), 1–62.</p>
+          </div>
+          <div>
+            <Label htmlFor="cpm">Carousels for month</Label>
+            <Input
+              id="cpm"
+              type="number"
+              inputMode="numeric"
+              className="mt-1"
+              min={0}
+              max={values.postsPerMonth}
+              value={values.carouselsPerMonth}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === "") {
+                  setValues({ ...values, carouselsPerMonth: 0 });
+                  return;
+                }
+                const n = Number(raw);
+                if (!Number.isFinite(n)) return;
+                setValues({
+                  ...values,
+                  carouselsPerMonth: clampCarouselsState(n, values.postsPerMonth),
+                });
+              }}
+              onBlur={() =>
+                setValues((v) => ({
+                  ...v,
+                  carouselsPerMonth: clampCarouselsState(v.carouselsPerMonth, v.postsPerMonth),
+                }))
+              }
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Rows that use type Carousel (0–{values.postsPerMonth}). Remaining rows are single-image posters.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-start gap-2">
+          <Checkbox
+            id="carousels"
+            className="mt-0.5"
+            checked={values.useCarousels}
+            onCheckedChange={(c) => setValues({ ...values, useCarousels: Boolean(c) })}
+          />
+          <Label htmlFor="carousels" className="cursor-pointer text-sm font-normal leading-snug">
+            Use carousels for eligible formats (when not using a fixed count above, Claude may pick carousels for
+            step-by-step, comparisons, etc.)
+          </Label>
         </div>
       </div>
 
@@ -673,39 +776,6 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
               {label}
             </label>
           ))}
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <div>
-          <Label htmlFor="ppm">Posts per month</Label>
-          <Input
-            id="ppm"
-            type="number"
-            inputMode="numeric"
-            value={values.postsPerMonth}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw === "") {
-                setValues({ ...values, postsPerMonth: 15 });
-                return;
-              }
-              const n = Number(raw);
-              if (!Number.isFinite(n)) return;
-              setValues({ ...values, postsPerMonth: n });
-            }}
-            onBlur={() =>
-              setValues((v) => ({ ...v, postsPerMonth: clampPostsPerMonthState(v.postsPerMonth) }))
-            }
-          />
-        </div>
-        <div className="flex items-end gap-2 pb-1">
-          <Checkbox
-            id="carousels"
-            checked={values.useCarousels}
-            onCheckedChange={(c) => setValues({ ...values, useCarousels: Boolean(c) })}
-          />
-          <Label htmlFor="carousels">Use carousels for eligible formats</Label>
         </div>
       </div>
 

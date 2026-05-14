@@ -47,7 +47,9 @@ export function ClientCard({ client, onOpen }: ClientCardProps) {
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Stethoscope className="h-3 w-3" />
-          {client.postsPerMonth} posts / month · {client.useCarousels ? "Carousels on" : "Posters only"}
+          {client.postsPerMonth} rows/mo
+          {(client.carouselsPerMonth ?? 0) > 0 ? ` · ${client.carouselsPerMonth} carousel` : ""} ·{" "}
+          {client.useCarousels ? "Flexible carousels on" : "Flexible carousels off"}
         </div>
       </CardContent>
     </Card>

@@ -64,6 +64,12 @@ export function ClientsPage() {
       specialty: values.specialty,
       brandType: values.brandType,
       postsPerMonth: clampPostsPerMonth(values.postsPerMonth),
+      carouselsPerMonth: (() => {
+        const posts = clampPostsPerMonth(values.postsPerMonth);
+        const raw = typeof values.carouselsPerMonth === "number" ? values.carouselsPerMonth : Number(values.carouselsPerMonth);
+        const c = Number.isFinite(raw) ? Math.floor(raw) : 0;
+        return Math.min(posts, 62, Math.max(0, c));
+      })(),
       useCarousels: values.useCarousels,
       notes: values.notes || null,
       supportingTextDefault: values.supportingTextDefault.trim() || null,

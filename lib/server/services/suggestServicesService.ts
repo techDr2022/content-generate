@@ -1,13 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { MedicalSpecialty } from "@/lib/types";
 import {
+  ANTHROPIC_SUGGEST_MAX_ATTEMPTS,
+  anthropicSuggestBackoffMs,
+  isRetryableAnthropicSuggestError,
+  sleep,
+} from "./anthropicSuggestRetry";
+import {
   getAvailableServicesForSpecialties,
   isValidCustomServiceName,
   MAX_SERVICES_PER_CLIENT,
 } from "@/lib/types";
 
 function anthropicModel(): string {
-  return process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-20250514";
+  return process.env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-6";
 }
 
 function parseJsonArray(raw: string): unknown {
@@ -111,22 +117,35 @@ RULES:
     maxRetries: 0,
   });
 
-  const response = await client.messages.create({
-    model,
-    max_tokens: 8192,
-    system,
-    messages: [{ role: "user", content: user }],
-  });
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= ANTHROPIC_SUGGEST_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await client.messages.create({
+        model,
+        max_tokens: 8192,
+        system,
+        messages: [{ role: "user", content: user }],
+      });
 
-  const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
-    throw new Error("No text in Claude response");
+      const textBlock = response.content.find((b) => b.type === "text");
+      if (!textBlock || textBlock.type !== "text") {
+        throw new Error("No text in Claude response");
+      }
+
+      const parsed = parseJsonArray(textBlock.text);
+      if (!Array.isArray(parsed)) {
+        throw new Error("Expected JSON array from Claude");
+      }
+
+      return normalizeSuggestedServices(parsed, params.specialties);
+    } catch (err) {
+      lastError = err;
+      if (attempt >= ANTHROPIC_SUGGEST_MAX_ATTEMPTS || !isRetryableAnthropicSuggestError(err)) {
+        break;
+      }
+      await sleep(anthropicSuggestBackoffMs(attempt, err));
+    }
   }
 
-  const parsed = parseJsonArray(textBlock.text);
-  if (!Array.isArray(parsed)) {
-    throw new Error("Expected JSON array from Claude");
-  }
-
-  return normalizeSuggestedServices(parsed, params.specialties);
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }

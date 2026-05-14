@@ -2,13 +2,14 @@ import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiResponse } from "@/lib/api";
 import { ENQUEUE_TIMEOUT_MS, postEnqueueWithRetry } from "@/lib/enqueueRetry";
-import type { CalendarPost, GenerationJobDTO, PosterLookId } from "@/lib/types";
+import type { CalendarPost, GenerationJobDTO, PosterBrandAssetsPayload, PosterImageOutputOptions, PosterLookId } from "@/lib/types";
 
 export interface GeneratePayload {
   clientId: string;
   month: number;
   year: number;
   postCountOverride?: number;
+  carouselCountOverride?: number;
   extraSpecialDays?: { label: string; date: string; type: "festival" | "awareness" | "campaign" }[];
 }
 
@@ -113,7 +114,7 @@ export function useJobCalendarRows(jobId: string | undefined) {
   });
 }
 
-export interface GeneratePosterImagePayload {
+export interface GeneratePosterImagePayload extends PosterImageOutputOptions, PosterBrandAssetsPayload {
   textInImage: string;
   posterLook: PosterLookId;
   posterLookCustom?: string;

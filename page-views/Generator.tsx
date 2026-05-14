@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { GeneratorForm } from "@/components/generator/GeneratorForm";
@@ -11,17 +11,25 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { useClients } from "@/hooks/useClients";
 import { useCancelJob, useEnqueueGenerate, useJob, useJobPreview, useSuggestSpecialDays } from "@/hooks/useGenerator";
+import type { GeneratePayload } from "@/hooks/useGenerator";
 import { useEnqueueBulkGenerate } from "@/hooks/useBulkExport";
 import { useJobProgress } from "@/hooks/useJobProgress";
 import { formatDuration } from "@/lib/formatDuration";
 import { cn } from "@/lib/utils";
 import type { CalendarPost } from "@/lib/types";
+import {
+  fingerprintSpecialties,
+  readCachedSuggestedSpecialDays,
+  writeCachedSuggestedSpecialDays,
+} from "@/lib/client/suggestedSpecialDaysCache";
 
 function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
 
-/** Merge AI-picked + manual special days; same calendar date: manual overwrites. */
+/**
+ * Merge AI-picked + manual special days; same calendar date: manual overwrites.
+ */
 function mergeRunSpecialDays(
   manual: RunSpecialDay[],
   aiRows: RunSpecialDay[],
@@ -72,9 +80,14 @@ export function GeneratorPage() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [months, setMonths] = useState<number[]>([new Date().getMonth() + 1]);
   const [postOverride, setPostOverride] = useState<number | undefined>(undefined);
+  const [carouselOverride, setCarouselOverride] = useState<number | undefined>(undefined);
   const [manualSpecialDays, setManualSpecialDays] = useState<RunSpecialDay[]>([]);
   const [aiSuggestedDays, setAiSuggestedDays] = useState<RunSpecialDay[]>([]);
   const [aiSuggestedSelected, setAiSuggestedSelected] = useState<boolean[]>([]);
+  const [aiSuggestListSource, setAiSuggestListSource] = useState<null | "cache" | "api">(null);
+  const [aiSuggestCacheSavedAt, setAiSuggestCacheSavedAt] = useState<number | null>(null);
+  const aiSuggestedDaysLenRef = useRef(0);
+  aiSuggestedDaysLenRef.current = aiSuggestedDays.length;
   const [sessionJobs, setSessionJobs] = useState<string[]>([]);
   const [progress, setProgress] = useState(0);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
@@ -87,6 +100,7 @@ export function GeneratorPage() {
     year: number;
   } | null>(null);
   const [enqueueError, setEnqueueError] = useState<string | null>(null);
+  const [generationNotice, setGenerationNotice] = useState<string | null>(null);
   /** Bump when a new batch is successfully enqueued so SSE drops stale events and reconnects. */
   const [progressStreamSession, setProgressStreamSession] = useState(0);
 
@@ -108,6 +122,73 @@ export function GeneratorPage() {
     () => clients.data?.find((c) => c.id === clientId),
     [clients.data, clientId]
   );
+
+  const specialtyFingerprint = useMemo(
+    () => fingerprintSpecialties(selectedClient?.specialty ?? []),
+    [selectedClient?.specialty]
+  );
+
+  const minRowsForSelectedMonths = useMemo(() => {
+    const merged = mergeRunSpecialDays(manualSpecialDays, aiSuggestedDays, aiSuggestedSelected);
+    let maxSpecialsInAnyMonth = 0;
+    for (const mo of months) {
+      const prefix = `${year}-${pad2(mo)}`;
+      const n = merged.filter((r) => r.label.trim().length > 0 && r.date.startsWith(prefix)).length;
+      maxSpecialsInAnyMonth = Math.max(maxSpecialsInAnyMonth, n);
+    }
+    const seedPosts = selectedClient?.postsPerMonth ?? 15;
+    const clientCar = selectedClient?.carouselsPerMonth ?? 0;
+    const resolvedCarousel =
+      typeof carouselOverride === "number" ? carouselOverride : clientCar > 0 ? clientCar : 0;
+    const posterCustom = typeof postOverride === "number" && postOverride >= 1;
+    const minFromCadence = posterCustom ? postOverride! + resolvedCarousel : seedPosts;
+    return Math.min(62, Math.max(1, maxSpecialsInAnyMonth, minFromCadence));
+  }, [
+    months,
+    year,
+    manualSpecialDays,
+    aiSuggestedDays,
+    aiSuggestedSelected,
+    postOverride,
+    carouselOverride,
+    selectedClient?.postsPerMonth,
+    selectedClient?.carouselsPerMonth,
+  ]);
+
+  /** Planned calendar row count (each row = one Poster or one Carousel), after specials floor. */
+  const plannedTotalRows = useMemo(() => {
+    const raw =
+      typeof postOverride === "number" && postOverride >= 1
+        ? Math.min(
+            62,
+            postOverride + (typeof carouselOverride === "number" ? carouselOverride : 0)
+          )
+        : (selectedClient?.postsPerMonth ?? 15);
+    return Math.min(62, Math.max(raw, minRowsForSelectedMonths));
+  }, [postOverride, carouselOverride, selectedClient?.postsPerMonth, minRowsForSelectedMonths]);
+
+  /** With custom poster count P, carousels only share the 62-row cap (specials bump total on generate, not carousel max). */
+  const maxCarouselAllowed = useMemo(() => {
+    if (typeof postOverride === "number" && postOverride >= 1) {
+      return Math.max(0, 62 - postOverride);
+    }
+    return Math.min(62, plannedTotalRows);
+  }, [postOverride, plannedTotalRows]);
+
+  useEffect(() => {
+    if (carouselOverride === undefined) return;
+    if (carouselOverride > maxCarouselAllowed) {
+      setCarouselOverride(maxCarouselAllowed);
+    }
+  }, [carouselOverride, maxCarouselAllowed]);
+
+  useEffect(() => {
+    if (typeof postOverride !== "number" || postOverride < 1) return;
+    const c = typeof carouselOverride === "number" ? carouselOverride : 0;
+    if (postOverride + c > 62) {
+      setPostOverride(Math.max(1, 62 - c));
+    }
+  }, [postOverride, carouselOverride]);
 
   useEffect(() => {
     if (!batchActive) return undefined;
@@ -231,12 +312,51 @@ export function GeneratorPage() {
 
   useEffect(() => {
     setPostOverride(undefined);
+    setCarouselOverride(undefined);
   }, [clientId]);
 
   useEffect(() => {
-    setAiSuggestedDays([]);
-    setAiSuggestedSelected([]);
-  }, [clientId, year, months.join(",")]);
+    const mo = months[0];
+    if (mo == null) {
+      setAiSuggestedDays([]);
+      setAiSuggestedSelected([]);
+      setAiSuggestListSource(null);
+      setAiSuggestCacheSavedAt(null);
+      return;
+    }
+    if (!selectedClient?.specialty?.length) {
+      setAiSuggestedDays([]);
+      setAiSuggestedSelected([]);
+      setAiSuggestListSource(null);
+      setAiSuggestCacheSavedAt(null);
+      return;
+    }
+    const specs = selectedClient.specialty ?? [];
+    const cached = readCachedSuggestedSpecialDays(specs, mo, year);
+    if (cached?.days.length) {
+      setAiSuggestedDays(cached.days);
+      setAiSuggestedSelected(cached.days.map(() => true));
+      setAiSuggestListSource("cache");
+      setAiSuggestCacheSavedAt(cached.savedAt);
+    } else {
+      setAiSuggestedDays([]);
+      setAiSuggestedSelected([]);
+      setAiSuggestListSource(null);
+      setAiSuggestCacheSavedAt(null);
+    }
+  }, [year, months.join(","), specialtyFingerprint]);
+
+  /** Keep checkbox array aligned with suggestion rows (avoids silent drops when lengths diverge). */
+  useEffect(() => {
+    if (aiSuggestedDays.length === 0) {
+      setAiSuggestedSelected((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+    setAiSuggestedSelected((prev) => {
+      if (prev.length === aiSuggestedDays.length) return prev;
+      return aiSuggestedDays.map((_, i) => (i < prev.length ? prev[i] === true : true));
+    });
+  }, [aiSuggestedDays]);
 
   function mergedExtraDays(): RunSpecialDay[] {
     return mergeRunSpecialDays(manualSpecialDays, aiSuggestedDays, aiSuggestedSelected);
@@ -256,14 +376,34 @@ export function GeneratorPage() {
     });
   }
 
-  function handleSuggestSpecialDays(): void {
-    if (!clientId || months.length === 0) return;
+  function handleSuggestSpecialDays(forceApi = false): void {
+    if (!clientId || months.length === 0 || !selectedClient?.specialty?.length) return;
+    const mo = months[0]!;
+    const specs = selectedClient.specialty ?? [];
+    suggestSpecialDays.reset();
+
+    if (!forceApi) {
+      const cached = readCachedSuggestedSpecialDays(specs, mo, year);
+      if (cached?.days.length) {
+        if (aiSuggestedDaysLenRef.current === 0) {
+          setAiSuggestedDays(cached.days);
+          setAiSuggestedSelected(cached.days.map(() => true));
+          setAiSuggestListSource("cache");
+          setAiSuggestCacheSavedAt(cached.savedAt);
+        }
+        return;
+      }
+    }
+
     suggestSpecialDays.mutate(
-      { clientId, month: months[0]!, year },
+      { clientId, month: mo, year },
       {
         onSuccess: (data) => {
           setAiSuggestedDays(data);
           setAiSuggestedSelected(data.map(() => true));
+          setAiSuggestListSource("api");
+          setAiSuggestCacheSavedAt(null);
+          writeCachedSuggestedSpecialDays(specs, mo, year, data);
         },
       }
     );
@@ -276,17 +416,44 @@ export function GeneratorPage() {
       return;
     }
     setEnqueueError(null);
+    setGenerationNotice(null);
     setSessionJobs([]);
     setProgress(0);
     setLastDone(null);
     setCompletedIds(new Set());
     setRunStartedAt(null);
     setTick(0);
-    const base = {
+    const clientDefault = selectedClient?.postsPerMonth ?? 15;
+    const clientCar = selectedClient?.carouselsPerMonth ?? 0;
+    const userWantsCustomPosters = typeof postOverride === "number" && postOverride >= 1;
+    const carouselAddon =
+      typeof carouselOverride === "number"
+        ? carouselOverride
+        : userWantsCustomPosters && clientCar > 0
+          ? clientCar
+          : 0;
+    const userRows = userWantsCustomPosters
+      ? Math.min(62, postOverride + carouselAddon)
+      : clientDefault;
+    const finalRows = Math.min(62, Math.max(userRows, minRowsForSelectedMonths));
+
+    if (finalRows > userRows) {
+      setGenerationNotice(
+        `Using ${finalRows} total calendar rows for this run (minimum ${minRowsForSelectedMonths} for your selected special days, poster count, and carousel count).`
+      );
+      window.setTimeout(() => setGenerationNotice(null), 10_000);
+    }
+
+    const base: Omit<GeneratePayload, "month" | "extraSpecialDays"> = {
       clientId,
       year,
-      postCountOverride: postOverride,
     };
+    if (userWantsCustomPosters || finalRows !== clientDefault) {
+      base.postCountOverride = finalRows;
+    }
+    if (typeof carouselOverride === "number") {
+      base.carouselCountOverride = carouselOverride;
+    }
     try {
       if (months.length === 1) {
         const job = await enqueueSingle.mutateAsync({
@@ -334,9 +501,13 @@ export function GeneratorPage() {
         onMonthsChange={setMonths}
         postOverride={postOverride}
         onPostOverrideChange={setPostOverride}
+        carouselOverride={carouselOverride}
+        onCarouselOverrideChange={setCarouselOverride}
+        clientUseCarousels={selectedClient?.useCarousels}
         extraSpecialDays={manualSpecialDays}
         onExtraSpecialDaysChange={setManualSpecialDays}
         clientDefaultPosts={selectedClient?.postsPerMonth}
+        clientDefaultCarousels={selectedClient?.carouselsPerMonth}
         clientLabel={selectedClient?.name}
         clientSpecialties={selectedClient?.specialty ?? []}
         suggestionMonth={months[0]}
@@ -344,7 +515,10 @@ export function GeneratorPage() {
         aiSuggestedDays={aiSuggestedDays}
         aiSuggestedSelected={aiSuggestedSelected}
         onAiSuggestedToggle={handleAiSuggestedToggle}
-        onSuggestSpecialDays={handleSuggestSpecialDays}
+        onSuggestSpecialDays={() => handleSuggestSpecialDays(false)}
+        onSuggestSpecialDaysForceApi={() => handleSuggestSpecialDays(true)}
+        suggestListSource={aiSuggestListSource}
+        suggestCacheSavedAt={aiSuggestCacheSavedAt}
         suggestSpecialDaysLoading={suggestSpecialDays.isPending}
         suggestSpecialDaysError={
           suggestSpecialDays.error instanceof Error
@@ -354,6 +528,7 @@ export function GeneratorPage() {
               : null
         }
         showSuggestedSpecialDays={months.length > 0}
+        minRowsFromSelections={minRowsForSelectedMonths}
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -407,6 +582,14 @@ export function GeneratorPage() {
       {enqueueError ? (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {enqueueError}
+        </p>
+      ) : null}
+      {generationNotice ? (
+        <p
+          className="rounded-md border border-sky-500/40 bg-sky-50 px-3 py-2 text-sm text-sky-950 dark:border-sky-400/30 dark:bg-sky-950/40 dark:text-sky-50"
+          role="status"
+        >
+          {generationNotice}
         </p>
       ) : null}
 
