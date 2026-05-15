@@ -11,7 +11,7 @@
     "worker": "tsx scripts/run-generation-worker.ts",
     "build": "prisma generate && next build",
     "build:server": "npm run build",
-    "start": "next start --hostname 0.0.0.0",
+    "start": "next start --hostname 0.0.0.0 --port ${PORT:-3000}",
     "start:web-and-worker": "node scripts/start-web-and-worker.mjs",
     "lint": "next lint",
     "test": "vitest run",

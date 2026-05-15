@@ -1,0 +1,9 @@
+# https://nixpacks.com/docs/configuration/file
+# Keeps builds predictable on Railway (Node only, enough heap for `next build` + Prisma).
+
+providers = ["node"]
+
+[variables]
+NIXPACKS_NODE_VERSION = "22"
+# Avoid OOM during `next build` on small builders (harmless at runtime).
+NODE_OPTIONS = "--max-old-space-size=4096"

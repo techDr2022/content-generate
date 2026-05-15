@@ -5,7 +5,7 @@
     "buildCommand": "npm run build:server"
   },
   "deploy": {
-    "startCommand": "npm run db:deploy && npm run start:web-and-worker",
+    "startCommand": "npm run db:deploy && npm start",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",
