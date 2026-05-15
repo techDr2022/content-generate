@@ -33,6 +33,18 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  button,
+  [type="button"],
+  [type="submit"],
+  [role="button"] {
+    touch-action: manipulation;
+  }
 }
 
 @layer components {

@@ -25,6 +25,58 @@ const calendarPostSchema = z.object({
   topic: z.string(),
 });
 
+const TOPIC_MAX_LEN = 120;
+
+function readTopicFromRow(row: Record<string, unknown>): string | undefined {
+  for (const key of ["topic", "Topic", "TOPIC"] as const) {
+    const v = row[key];
+    if (typeof v === "string" && v.trim().length > 0) {
+      return v.trim();
+    }
+  }
+  return undefined;
+}
+
+/** Model sometimes drops `topic` on a few rows; derive one so Zod + topicHistory stay consistent. */
+function normalizeClaudeCalendarPostsForValidation(raw: unknown[]): unknown[] {
+  return raw.map((item, index) => {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) {
+      return item;
+    }
+    const row = { ...(item as Record<string, unknown>) };
+    const existing = readTopicFromRow(row);
+    if (existing) {
+      row.topic = existing.slice(0, TOPIC_MAX_LEN);
+      delete row.Topic;
+      delete row.TOPIC;
+      return row;
+    }
+
+    const textInImage = typeof row.textInImage === "string" ? row.textInImage : "";
+    const normalizedBreaks = textInImage.replace(/\\n/g, "\n");
+    const firstLine =
+      normalizedBreaks
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .find((s) => s.length > 0) ?? "";
+    const department = typeof row.department === "string" ? row.department.trim() : "";
+    const style = typeof row.style === "string" ? row.style.trim() : "";
+    const fromHeadline = firstLine.slice(0, TOPIC_MAX_LEN);
+    const fromDeptStyle = [department, style].filter(Boolean).join(" — ").slice(0, TOPIC_MAX_LEN);
+    const topic = fromHeadline || fromDeptStyle || `Calendar post ${index + 1}`;
+
+    logger.warn("Coalesced missing calendar topic from model output", {
+      index,
+      topic,
+      hadTextInImage: textInImage.length > 0,
+    });
+    row.topic = topic;
+    delete row.Topic;
+    delete row.TOPIC;
+    return row;
+  });
+}
+
 export type GenerationProgress = {
   updateProgress: (obj: object) => Promise<void>;
 };
@@ -291,7 +343,8 @@ export async function executeGenerationJob(
 
     let posts: CalendarPost[];
     try {
-      posts = z.array(calendarPostSchema).parse(rawPosts);
+      const normalizedPosts = normalizeClaudeCalendarPostsForValidation(rawPosts as unknown[]);
+      posts = z.array(calendarPostSchema).parse(normalizedPosts);
     } catch (zErr) {
       logger.error("Calendar JSON failed Zod validation", {
         jobId,
