@@ -26,16 +26,15 @@ export function PosterImagesActionsCard({
   posterGenerateBlocked,
 }: PosterImagesActionsCardProps) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Poster images from Text in image</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Uses each row&apos;s <span className="font-medium text-foreground">Text in image</span> only (plus the poster look
-          chosen above). You can also use the table&apos;s <span className="font-medium text-foreground">Poster image</span>{" "}
-          column.
+    <Card className="overflow-hidden border-slate-200/90 shadow-sm dark:border-slate-800">
+      <CardHeader className="space-y-2 px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-5">
+        <CardTitle className="text-lg leading-tight sm:text-xl">Poster images</CardTitle>
+        <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+          Each row uses <span className="font-medium text-foreground">Text in image</span> plus the poster look above. You
+          can also use the <span className="font-medium text-foreground">Poster</span> column in the table.
         </p>
       </CardHeader>
-      <CardContent className="max-h-[min(420px,60vh)] space-y-2 overflow-y-auto pr-1">
+      <CardContent className="max-h-[min(52dvh,480px)] space-y-2 overflow-y-auto overscroll-y-contain px-4 pb-4 pt-0 [-webkit-overflow-scrolling:touch] sm:max-h-[min(56dvh,520px)] sm:px-6 sm:pb-6">
         {rows.map((row, index) => {
           const key = posterRowKey(row, index);
           const text = row.textInImage?.trim();
@@ -45,7 +44,7 @@ export function PosterImagesActionsCard({
           return (
             <div
               key={key}
-              className="flex flex-col gap-2 rounded-md border bg-muted/20 p-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+              className="flex flex-col gap-3 rounded-lg border border-slate-200/80 bg-card p-3.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4 dark:border-slate-800"
             >
               <div className="min-w-0 flex-1 space-y-1">
                 <p className="text-xs font-medium text-foreground">{row.date}</p>
@@ -57,7 +56,7 @@ export function PosterImagesActionsCard({
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="shrink-0 gap-1.5 self-start sm:self-center"
+                className="h-10 w-full shrink-0 gap-2 sm:h-9 sm:w-auto sm:self-center"
                 disabled={disabled}
                 onClick={() => void onGeneratePoster(row, index)}
                 aria-label={`Generate poster image for ${row.date}`}

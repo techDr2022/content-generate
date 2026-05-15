@@ -1,4 +1,5 @@
 import type { ClientDTO } from "@/lib/types";
+import Link from "next/link";
 import { MapPin, Stethoscope } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,9 +18,14 @@ export function ClientCard({ client, onOpen }: ClientCardProps) {
           <CardTitle className="text-lg">{client.name}</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">{client.doctorName}</p>
         </div>
-        <Button size="sm" variant="outline" onClick={() => onOpen(client)}>
-          Manage
-        </Button>
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <Button size="sm" variant="outline" onClick={() => onOpen(client)}>
+            Manage
+          </Button>
+          <Button size="sm" variant="secondary" asChild>
+            <Link href={`/clients/${client.id}`}>Calendars</Link>
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap gap-1">

@@ -11,7 +11,7 @@ export function assertRedisForQueue(): void {
   if (!process.env.REDIS_URL?.trim()) {
     throw new HttpError(
       503,
-      "Redis is not configured (REDIS_URL). Add your Railway Redis URL to .env to enable calendar generation."
+      "Redis is not configured (REDIS_URL). Set REDIS_URL (e.g. Upstash Redis URL, not REST) in .env to enable calendar generation."
     );
   }
 }

@@ -16,6 +16,7 @@ model User {
   clients      Client[]
   jobs         GenerationJob[]
   trendingNewsStates UserTrendingNewsState[]
+  reviewSessionsCreated ClientReviewSession[]
 }
 
 model Client {
@@ -41,6 +42,8 @@ model Client {
   specialDays   SpecialDay[]
   topicHistory  TopicHistory[]
   jobs          GenerationJob[]
+  calendars     Calendar[]
+  reviewSessions ClientReviewSession[]
 }
 
 model SpecialDay {
@@ -80,6 +83,124 @@ model GenerationJob {
   errorMsg  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  calendar  Calendar?
+}
+
+model Calendar {
+  id        String   @id
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  month     Int
+  year      Int
+  job       GenerationJob @relation(fields: [id], references: [id], onDelete: Cascade)
+  posts     Post[]
+  reviewSessions ClientReviewSession[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+}
+
+model Post {
+  id              String   @id @default(cuid())
+  calendarId      String
+  calendar        Calendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  rowIndex        Int
+  date            String
+  code            String
+  department      String
+  postType        String
+  style           String
+  textInImage     String   @default("")
+  caption         String
+  hashtags        String   @default("")
+  specialDay      String?
+  topic           String   @default("")
+  isAIAdded       Boolean  @default(false)
+  posterObjectKey String?
+  feedback        PostFeedback[]
+  logEntries      ReviewSessionLog[] @relation("LogPost")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([calendarId, rowIndex])
+  @@index([calendarId])
+}
+
+enum ReviewSessionStatus {
+  PENDING
+  OPENED
+  IN_REVIEW
+  SUBMITTED
+  EXPIRED
+}
+
+enum PostFeedbackStatus {
+  PENDING
+  APPROVED
+  APPROVED_WITH_EDITS
+  REJECTED
+}
+
+model ClientReviewSession {
+  id              String    @id @default(cuid())
+  clientId        String
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  calendarId      String
+  calendar        Calendar  @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  createdByUserId String
+  createdBy       User      @relation(fields: [createdByUserId], references: [id])
+
+  accessToken     String    @unique
+  pin             String?
+  email           String?
+  expiresAt       DateTime
+  lastAccessedAt  DateTime?
+
+  status          ReviewSessionStatus @default(PENDING)
+  submittedAt     DateTime?
+  internalNote    String?
+
+  postFeedbacks   PostFeedback[]
+  sessionLogs     ReviewSessionLog[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([clientId, calendarId])
+  @@index([accessToken])
+}
+
+model PostFeedback {
+  id               String    @id @default(cuid())
+  sessionId        String
+  session          ClientReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  postId           String
+  post             Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  status           PostFeedbackStatus @default(PENDING)
+  editedCaption    String?
+  editedHashtags   String?
+  rejectionReason  String?
+  clientNote       String?
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([sessionId, postId])
+}
+
+model ReviewSessionLog {
+  id          String   @id @default(cuid())
+  sessionId   String
+  session     ClientReviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  event       String
+  postId      String?
+  post        Post?    @relation("LogPost", fields: [postId], references: [id], onDelete: SetNull)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([sessionId])
 }
 
 model TrendingNewsIngestionState {

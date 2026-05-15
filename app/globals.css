@@ -34,3 +34,15 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+@layer components {
+  /** Calendar preview: one <details> for mobile; on lg behave like a static block (no duplicate React trees). */
+  @media (min-width: 1024px) {
+    .calendar-preview-details {
+      display: contents;
+    }
+    .calendar-preview-details > summary {
+      display: none !important;
+    }
+  }
+}

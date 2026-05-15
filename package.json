@@ -11,7 +11,8 @@
     "worker": "tsx scripts/run-generation-worker.ts",
     "build": "prisma generate && next build",
     "build:server": "npm run build",
-    "start": "next start",
+    "start": "next start --hostname 0.0.0.0",
+    "start:web-and-worker": "node scripts/start-web-and-worker.mjs",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -53,6 +54,7 @@
     "react-dom": "^18.3.1",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "tsx": "^4.19.2",
     "zod": "^3.24.1",
     "rss-parser": "^3.13.0"
   },
@@ -68,7 +70,6 @@
     "eslint-config-next": "^15.5.18",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^3.1.3"
   }

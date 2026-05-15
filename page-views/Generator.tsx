@@ -568,7 +568,12 @@ export function GeneratorPage() {
             (same <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">.env</code> /{" "}
             <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">.env.local</code> as <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run dev</code>
             ), or use <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run dev:all</code> to start Next and the worker together. Ensure{" "}
-            <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">REDIS_URL</code> is set.
+            <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">REDIS_URL</code> is set.{" "}
+            <span className="block pt-1">
+              In production, the host must also run the worker (same <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">REDIS_URL</code>): e.g.{" "}
+              <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run start:web-and-worker</code> on Railway, or a second service with{" "}
+              <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run worker</code> if the web app runs elsewhere (Vercel cannot keep a worker alive).
+            </span>
           </p>
         </div>
       ) : null}

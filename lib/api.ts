@@ -51,7 +51,8 @@ api.interceptors.response.use(
     const skipLogout =
       url.includes("/auth/login") ||
       url.includes("/auth/register") ||
-      url.includes("/auth/change-password");
+      url.includes("/auth/change-password") ||
+      url.includes("/api/review/");
     if (skipLogout) {
       return Promise.reject(err);
     }

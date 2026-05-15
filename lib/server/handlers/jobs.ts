@@ -206,17 +206,9 @@ export function createJobProgressStreamResponse(userId: string, jobId: string): 
   });
 }
 
-export async function previewJobCalendar(userId: string, jobId: string) {
-  const job = await prisma.generationJob.findFirst({
-    where: { id: jobId, userId, status: "done" },
-  });
-  if (!job) {
-    throw new HttpError(404, "Completed job not found");
-  }
-
-  const buffer = await loadWorkbookBufferForJob({ id: job.id, fileUrl: job.fileUrl });
+/** Parse the first worksheet of a generated calendar workbook into calendar rows. */
+export async function parseCalendarPostsFromWorkbookBuffer(buffer: Buffer): Promise<CalendarPost[]> {
   const workbook = new ExcelJS.Workbook();
-  // exceljs typings are stricter than Node's Buffer generic; runtime is fine.
   await workbook.xlsx.load(buffer as never);
   const sheet = workbook.worksheets[0];
   if (!sheet) {
@@ -254,6 +246,19 @@ export async function previewJobCalendar(userId: string, jobId: string) {
     });
   });
 
+  return rows;
+}
+
+export async function previewJobCalendar(userId: string, jobId: string) {
+  const job = await prisma.generationJob.findFirst({
+    where: { id: jobId, userId, status: "done" },
+  });
+  if (!job) {
+    throw new HttpError(404, "Completed job not found");
+  }
+
+  const buffer = await loadWorkbookBufferForJob({ id: job.id, fileUrl: job.fileUrl });
+  const rows = await parseCalendarPostsFromWorkbookBuffer(buffer);
   return { success: true as const, data: rows };
 }
 

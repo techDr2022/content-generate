@@ -7,7 +7,7 @@ import {
   type PosterImageOutputState,
   type PosterLookId,
 } from "@/lib/types";
-import { Copy } from "lucide-react";
+import { ChevronDown, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { copyCalendarPostsForSheets } from "@/lib/calendarSheetExport";
@@ -18,6 +18,7 @@ import { usePosterImageFlow } from "@/hooks/usePosterImageFlow";
 import { PosterBrandAssetsControls } from "./PosterBrandAssetsControls";
 import { PosterImageOutputControls } from "./PosterImageOutputControls";
 import { PosterLookControls } from "./PosterLookControls";
+import { cn } from "@/lib/utils";
 
 interface CalendarPreviewProps {
   rows: CalendarPost[];
@@ -43,15 +44,40 @@ export function CalendarPreview({ rows }: CalendarPreviewProps) {
     }
   }
 
+  const posterSettings = (
+    <div className="grid gap-5 sm:gap-6 md:grid-cols-2 md:items-start">
+      <div className="min-w-0 space-y-4">
+        <PosterLookControls
+          posterLook={posterLook}
+          onPosterLookChange={setPosterLook}
+          posterLookCustom={posterLookCustom}
+          onPosterLookCustomChange={setPosterLookCustom}
+        />
+        <PosterBrandAssetsControls
+          value={brandAssets}
+          onChange={(patch) => setBrandAssets((prev) => ({ ...prev, ...patch }))}
+        />
+      </div>
+      <div className="min-w-0 space-y-3">
+        <p className="text-sm font-medium text-foreground">Customize image output</p>
+        <PosterImageOutputControls
+          value={imageOutput}
+          onChange={(patch) => setImageOutput((prev) => ({ ...prev, ...patch }))}
+        />
+      </div>
+    </div>
+  );
+
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <CardTitle className="text-lg">Calendar preview</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Pulled from the generated workbook for quick QA before sending to the client team.
+    <div className="flex min-w-0 flex-col gap-4">
+      <Card className="overflow-hidden border-slate-200/90 shadow-md dark:border-slate-800">
+        <CardHeader className="space-y-3 px-4 pb-4 pt-5 sm:px-6 sm:pb-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+            <div className="min-w-0 space-y-1">
+              <CardTitle className="text-lg leading-tight sm:text-xl">Calendar preview</CardTitle>
+              <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+                Workbook rows for QA. Scroll horizontally on small screens. Use poster settings below, then generate
+                images from the table or the quick list.
               </p>
             </div>
             {rows.length > 0 ? (
@@ -59,48 +85,39 @@ export function CalendarPreview({ rows }: CalendarPreviewProps) {
                 type="button"
                 variant="outline"
                 size="sm"
-                className="shrink-0 gap-1.5"
+                className="h-10 w-full shrink-0 gap-2 sm:h-9 sm:w-auto"
                 onClick={() => void handleCopySheet()}
                 aria-label="Copy entire calendar as tab-separated text for Google Sheets"
               >
-                <Copy className="h-4 w-4" />
+                <Copy className="h-4 w-4 shrink-0" />
                 {copyState === "copied"
                   ? "Copied"
                   : copyState === "error"
-                    ? "Copy blocked — try again"
-                    : "Copy for Google Sheets"}
+                    ? "Copy failed — retry"
+                    : "Copy for Sheets"}
               </Button>
             ) : null}
           </div>
         </CardHeader>
         {rows.length > 0 ? (
-          <div className="border-b bg-muted/15 px-6 py-4">
-            <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-              <div className="space-y-4">
-                <PosterLookControls
-                  posterLook={posterLook}
-                  onPosterLookChange={setPosterLook}
-                  posterLookCustom={posterLookCustom}
-                  onPosterLookCustomChange={setPosterLookCustom}
-                />
-                <PosterBrandAssetsControls
-                  value={brandAssets}
-                  onChange={(patch) => setBrandAssets((prev) => ({ ...prev, ...patch }))}
-                />
-              </div>
-              <div className="space-y-3">
-                <p className="text-sm font-medium text-foreground">Customize image output</p>
-                <PosterImageOutputControls
-                  value={imageOutput}
-                  onChange={(patch) => setImageOutput((prev) => ({ ...prev, ...patch }))}
-                />
-              </div>
+          <details className="calendar-preview-details group border-t border-slate-200/80 bg-muted/20 dark:border-slate-800">
+            <summary
+              className={cn(
+                "flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3.5 text-sm font-semibold text-foreground sm:px-6 lg:hidden",
+                "[&::-webkit-details-marker]:hidden"
+              )}
+            >
+              <span>Poster & image settings</span>
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+            </summary>
+            <div className="border-t border-slate-200/60 px-4 pb-5 pt-3 sm:px-6 lg:pt-5">
+              {posterSettings}
             </div>
-          </div>
+          </details>
         ) : null}
-        <CardContent className="max-h-[480px] overflow-auto">
+        <CardContent className="p-0">
           {rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No preview rows yet.</p>
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground sm:px-6">No preview rows yet.</p>
           ) : (
             <CalendarTable
               rows={rows}

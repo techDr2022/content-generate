@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, Download, History, ImageIcon, LayoutDashboard, Settings, Sparkles, Users } from "lucide-react";
+import { CalendarDays, ClipboardList, Download, History, ImageIcon, LayoutDashboard, Settings, Sparkles, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/clients", label: "Clients", icon: Users },
+  { href: "/reviews", label: "Reviews", icon: ClipboardList },
   { href: "/generator", label: "Generator", icon: Sparkles },
   { href: "/poster-images", label: "Poster images", icon: ImageIcon },
   { href: "/bulk-export", label: "Bulk export", icon: Download },

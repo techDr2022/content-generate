@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
   flexRender,
   getCoreRowModel,
@@ -17,11 +18,14 @@ import { useJobs, useRegenerateJob } from "@/hooks/useJobs";
 import { useClients } from "@/hooks/useClients";
 import type { GenerationJobDTO } from "@/lib/types";
 import { api } from "@/lib/api";
+import { SendReviewSessionDialog } from "@/components/review/SendReviewSessionDialog";
 
 export function JobHistoryPage() {
   const jobs = useJobs();
   const clients = useClients();
   const regenerate = useRegenerateJob();
+
+  const [sendJobId, setSendJobId] = useState<string | null>(null);
 
   const [status, setStatus] = useState<string>("all");
   const [clientId, setClientId] = useState<string>("all");
@@ -85,25 +89,33 @@ export function JobHistoryPage() {
         id: "actions",
         header: "",
         cell: ({ row }) => (
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             {row.original.status === "done" ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={async () => {
-                  const res = await api.get(`/api/jobs/${row.original.id}/download`, { responseType: "blob" });
-                  const url = window.URL.createObjectURL(new Blob([res.data]));
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = `calendar-${row.original.id}.xlsx`;
-                  document.body.appendChild(a);
-                  a.click();
-                  a.remove();
-                  window.URL.revokeObjectURL(url);
-                }}
-              >
-                Download
-              </Button>
+              <>
+                <Button size="sm" variant="default" asChild>
+                  <Link href={`/jobs/${row.original.id}/view`}>View</Link>
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => setSendJobId(row.original.id)}>
+                  Send to client
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={async () => {
+                    const res = await api.get(`/api/jobs/${row.original.id}/download`, { responseType: "blob" });
+                    const url = window.URL.createObjectURL(new Blob([res.data]));
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `calendar-${row.original.id}.xlsx`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(url);
+                  }}
+                >
+                  Download
+                </Button>
+              </>
             ) : null}
             {row.original.status === "failed" ? (
               <Button
@@ -131,7 +143,7 @@ export function JobHistoryPage() {
   return (
     <PageWrapper
       title="Job history"
-      description="Audit every calendar generation, filter by client or status, and recover failed runs. Failed jobs show the server error under Failure details."
+      description="Open completed jobs to preview and send client review links. Download Excel to adjust copy offline, then use Send to client when ready. Failed jobs show the server error under Failure details."
     >
       <div className="grid gap-3 md:grid-cols-4">
         <div>
@@ -175,6 +187,14 @@ export function JobHistoryPage() {
           <Input id="to" type="date" className="mt-1" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
       </div>
+
+      <SendReviewSessionDialog
+        open={sendJobId !== null}
+        onOpenChange={(open) => {
+          if (!open) setSendJobId(null);
+        }}
+        calendarId={sendJobId}
+      />
 
       <div className="rounded-md border bg-white">
         <Table>
