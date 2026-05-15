@@ -11,7 +11,6 @@ import { useClients } from "@/hooks/useClients";
 import { useJobs } from "@/hooks/useJobs";
 import type { GenerationJobDTO } from "@/lib/types";
 import { api } from "@/lib/api";
-import { TrendingHealthcareNewsPanel } from "@/components/dashboard/TrendingHealthcareNewsPanel";
 
 function statusBadge(status: GenerationJobDTO["status"]) {
   if (status === "done") return <Badge variant="success">done</Badge>;
@@ -105,8 +104,6 @@ export function DashboardPage() {
           <CardContent className="text-3xl font-semibold">{stats.ready}</CardContent>
         </Card>
       </div>
-
-      <TrendingHealthcareNewsPanel />
 
       <Card>
         <CardHeader>

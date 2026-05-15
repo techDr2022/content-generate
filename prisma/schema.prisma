@@ -15,7 +15,6 @@ model User {
   createdAt    DateTime @default(now())
   clients      Client[]
   jobs         GenerationJob[]
-  trendingNewsStates UserTrendingNewsState[]
   reviewSessionsCreated ClientReviewSession[]
 }
 
@@ -201,53 +200,4 @@ model ReviewSessionLog {
   createdAt   DateTime @default(now())
 
   @@index([sessionId])
-}
-
-model TrendingNewsIngestionState {
-  id        String    @id @default("default")
-  lastRunAt DateTime?
-  lastOkAt  DateTime?
-  lastError String?
-}
-
-model TrendingNewsItem {
-  id              String   @id @default(cuid())
-  clusterId       String   @unique
-  primaryHeadline String
-  summary         String   @default("")
-  specialtyTags   String[]
-  relevanceScore  Float
-  sources         Json
-  fetchedAt       DateTime
-  createdAt       DateTime @default(now())
-  suggestion      NewsPosterSuggestion?
-  userStates      UserTrendingNewsState[]
-}
-
-model NewsPosterSuggestion {
-  id                         String           @id @default(cuid())
-  newsItemId                 String           @unique
-  newsItem                   TrendingNewsItem @relation(fields: [newsItemId], references: [id], onDelete: Cascade)
-  headlines                  String[]
-  keyTakeaway                String
-  visualDirection            Json
-  recommendedSpecialtyTags   String[]
-  cta                        String
-  complianceStatus           String
-  complianceFlags            String[]
-  createdAt                  DateTime         @default(now())
-}
-
-model UserTrendingNewsState {
-  id         String           @id @default(cuid())
-  userId     String
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  newsItemId String
-  newsItem   TrendingNewsItem @relation(fields: [newsItemId], references: [id], onDelete: Cascade)
-  saved      Boolean          @default(false)
-  dismissed  Boolean          @default(false)
-  updatedAt  DateTime         @updatedAt
-
-  @@unique([userId, newsItemId])
-  @@index([userId])
 }

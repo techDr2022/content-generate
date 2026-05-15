@@ -53,7 +53,6 @@
     "prisma": "^6.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "rss-parser": "^3.13.0",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "tsx": "^4.19.2",

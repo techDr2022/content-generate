@@ -1,6 +1,5 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import {
   defaultPosterBrandAssetsState,
   defaultPosterImageOutputState,
@@ -9,8 +8,7 @@ import {
   type PosterImageOutputState,
   type PosterLookId,
 } from "@/lib/types";
-import type { TrendingPosterPrefillV1 } from "@/lib/types/newsSuggestions";
-import { ImageIcon, Loader2, X } from "lucide-react";
+import { ImageIcon, Loader2 } from "lucide-react";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { PosterBrandAssetsControls } from "@/components/calendar/PosterBrandAssetsControls";
 import { PosterImageOutputControls } from "@/components/calendar/PosterImageOutputControls";
@@ -19,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import {
   Select,
@@ -30,7 +27,6 @@ import {
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useGeneratePosterImage, useJobCalendarRows } from "@/hooks/useGenerator";
-import { TRENDING_POSTER_PREFILL_KEY } from "@/hooks/useTrendingNewsSuggestions";
 import { useJobs } from "@/hooks/useJobs";
 import { cn } from "@/lib/utils";
 
@@ -67,17 +63,12 @@ interface BulkFail {
 }
 
 export function ImageStudioPage() {
-  const searchParams = useSearchParams();
   const jobs = useJobs();
   const [jobId, setJobId] = useState<string>("");
   const [posterLook, setPosterLook] = useState<PosterLookId>("text_only");
   const [posterLookCustom, setPosterLookCustom] = useState("");
   const [imageOutput, setImageOutput] = useState<PosterImageOutputState>(() => defaultPosterImageOutputState());
   const [brandAssets, setBrandAssets] = useState<PosterBrandAssetsState>(() => defaultPosterBrandAssetsState());
-  const [quickDraft, setQuickDraft] = useState<TrendingPosterPrefillV1 | null>(null);
-  const [quickText, setQuickText] = useState("");
-  const [quickResult, setQuickResult] = useState<{ src: string; fileName: string } | null>(null);
-  const [quickRunning, setQuickRunning] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkDone, setBulkDone] = useState(0);
@@ -96,27 +87,6 @@ export function ImageStudioPage() {
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, 80);
   }, [jobs.data]);
-
-  useEffect(() => {
-    if (searchParams.get("prefill") !== "1") return;
-    if (typeof window === "undefined") return;
-    const raw = window.sessionStorage.getItem(TRENDING_POSTER_PREFILL_KEY);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw) as TrendingPosterPrefillV1;
-      if (parsed?.v === 1 && typeof parsed.textInImage === "string" && parsed.textInImage.trim()) {
-        setQuickDraft(parsed);
-        setQuickText(parsed.textInImage);
-        setPosterLook(parsed.posterLook);
-        setPosterLookCustom(parsed.posterLookCustom ?? "");
-        setQuickResult(null);
-      }
-    } catch {
-      // ignore malformed payloads
-    }
-    window.sessionStorage.removeItem(TRENDING_POSTER_PREFILL_KEY);
-    window.history.replaceState({}, "", "/poster-images");
-  }, [searchParams]);
 
   useEffect(() => {
     setSelected(new Set());
@@ -213,129 +183,12 @@ export function ImageStudioPage() {
   const previewNeedsLocalHint =
     previewErrorMsg.includes("LOCAL") || previewErrorMsg.includes("Preview is only");
 
-  async function runQuickGenerate(): Promise<void> {
-    const text = quickText.trim();
-    if (!text || posterGenerateBlocked) return;
-    setQuickRunning(true);
-    setQuickResult(null);
-    try {
-      const data = await generateImage.mutateAsync({
-        textInImage: text,
-        posterLook,
-        posterLookCustom: posterLook === "custom" ? posterLookCustom.trim() : undefined,
-        ...imageOutput,
-        ...posterBrandPayloadFromState(brandAssets),
-      });
-      setQuickResult({
-        src: `data:${data.mimeType};base64,${data.imageBase64}`,
-        fileName: `poster-trending.${extFromMime(data.mimeType)}`,
-      });
-    } finally {
-      setQuickRunning(false);
-    }
-  }
-
   return (
     <PageWrapper
       title="Poster images"
       description="Load recent completed calendars, pick rows, and generate healthcare posters in bulk from Text in image."
       className="max-w-7xl"
     >
-      {quickDraft ? (
-        <Card className="mb-6 border-primary/20">
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-1">
-              <CardTitle className="text-lg">Trending news draft</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">{quickDraft.headline}</span> · CTA:{" "}
-                <span className="font-medium text-foreground">{quickDraft.cta}</span>
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {quickDraft.sourceUrl ? (
-                <Button variant="outline" size="sm" asChild>
-                  <a href={quickDraft.sourceUrl} target="_blank" rel="noreferrer">
-                    Open source
-                  </a>
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="gap-2"
-                onClick={() => {
-                  setQuickDraft(null);
-                  setQuickText("");
-                  setQuickResult(null);
-                }}
-              >
-                <X className="h-4 w-4" />
-                Close
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="quick-text">Text in image</Label>
-              <Textarea
-                id="quick-text"
-                rows={8}
-                value={quickText}
-                onChange={(e) => setQuickText(e.target.value)}
-                className="font-mono text-sm"
-              />
-            </div>
-            <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-              <div className="space-y-4">
-                <PosterLookControls
-                  posterLook={posterLook}
-                  onPosterLookChange={setPosterLook}
-                  posterLookCustom={posterLookCustom}
-                  onPosterLookCustomChange={setPosterLookCustom}
-                />
-                <PosterBrandAssetsControls
-                  value={brandAssets}
-                  onChange={(patch) => setBrandAssets((prev) => ({ ...prev, ...patch }))}
-                />
-              </div>
-              <div className="space-y-3">
-                <p className="text-sm font-medium text-foreground">Customize image output</p>
-                <PosterImageOutputControls
-                  value={imageOutput}
-                  onChange={(patch) => setImageOutput((prev) => ({ ...prev, ...patch }))}
-                />
-              </div>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <Button
-                type="button"
-                className="gap-2"
-                disabled={!quickText.trim() || posterGenerateBlocked || quickRunning}
-                onClick={() => void runQuickGenerate()}
-              >
-                {quickRunning ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <ImageIcon className="h-4 w-4" aria-hidden />}
-                Generate poster
-              </Button>
-              {posterGenerateBlocked ? (
-                <p className="text-xs text-destructive">Add custom instructions or choose another poster look.</p>
-              ) : null}
-            </div>
-            {quickResult ? (
-              <figure className="space-y-2 rounded-lg border bg-white p-3 shadow-sm">
-                <figcaption className="text-xs font-medium text-foreground">Preview</figcaption>
-                <img src={quickResult.src} alt="Generated poster" className="w-full max-w-md rounded-md border object-contain" />
-                <Button variant="secondary" size="sm" className="w-full max-w-md" asChild>
-                  <a href={quickResult.src} download={quickResult.fileName}>
-                    Download
-                  </a>
-                </Button>
-              </figure>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
-
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Recent calendar</CardTitle>
