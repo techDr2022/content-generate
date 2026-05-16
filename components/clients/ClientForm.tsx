@@ -14,7 +14,19 @@ import {
   MEDICAL_SPECIALTIES,
   SPECIALTY_SERVICES,
 } from "@/lib/types";
-import { ChevronDown, ChevronUp, Loader2, Search, Sparkles, Trash2, X } from "lucide-react";
+import {
+  Building2,
+  ChevronDown,
+  ChevronUp,
+  Hospital,
+  Loader2,
+  Search,
+  Sparkles,
+  Trash2,
+  User,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,10 +34,41 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { useSuggestServices } from "@/hooks/useClients";
+import { cn } from "@/lib/utils";
+import type { BrandType } from "@/lib/types";
+
+const DOCTOR_NAME_SEPARATOR = ", ";
+
+const CLIENT_TYPE_OPTIONS = [
+  { value: "clinic" as const, label: "Clinic", icon: Building2 },
+  { value: "hospital" as const, label: "Hospital", icon: Hospital },
+  { value: "personal" as const, label: "Individual", icon: User },
+];
+
+function isOrganizationBrand(brandType: BrandType): boolean {
+  return brandType === "clinic" || brandType === "hospital";
+}
+
+export function doctorsToDoctorName(doctors: string[], brandType: BrandType): string {
+  const trimmed = doctors.map((d) => d.trim()).filter(Boolean);
+  if (trimmed.length === 0) return "";
+  if (brandType === "personal") return trimmed[0];
+  return trimmed.join(DOCTOR_NAME_SEPARATOR);
+}
+
+function parseDoctorsFromClient(client: ClientDTO): string[] {
+  const name = client.doctorName.trim();
+  if (client.brandType === "personal") {
+    return name ? [name] : [""];
+  }
+  if (!name) return [""];
+  const parts = name.split(DOCTOR_NAME_SEPARATOR).map((s) => s.trim()).filter(Boolean);
+  return parts.length > 0 ? parts : [name];
+}
 
 export interface ClientFormValues {
   name: string;
-  doctorName: string;
+  doctors: string[];
   clinicName: string;
   city: string;
   specialty: string[];
@@ -71,7 +114,7 @@ function mapInitial(client: ClientDTO | null | undefined): ClientFormValues {
   if (!client) {
     return {
       name: "",
-      doctorName: "",
+      doctors: [""],
       clinicName: "",
       city: "",
       specialty: [],
@@ -87,7 +130,7 @@ function mapInitial(client: ClientDTO | null | undefined): ClientFormValues {
   }
   return {
     name: client.name,
-    doctorName: client.doctorName,
+    doctors: parseDoctorsFromClient(client),
     clinicName: client.clinicName,
     city: client.city,
     specialty: [...client.specialty],
@@ -212,7 +255,7 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
       specialties: values.specialty,
       clinicName: values.clinicName.trim() || undefined,
       city: values.city.trim() || undefined,
-      doctorName: values.doctorName.trim() || undefined,
+      doctorName: doctorsToDoctorName(values.doctors, values.brandType) || undefined,
       notes: values.notes.trim() || undefined,
     });
     setValues((v) => ({
@@ -254,14 +297,94 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
     isValidCustomSpecialtyName(customSpecialtyDraft) &&
     !customSpecIsDup;
 
+  const isOrganization = isOrganizationBrand(values.brandType);
+
+  function setBrandType(next: ClientFormValues["brandType"]): void {
+    setValues((v) => {
+      if (v.brandType === next) return v;
+      const wasOrg = isOrganizationBrand(v.brandType);
+      const willOrg = isOrganizationBrand(next);
+      if (wasOrg === willOrg) return { ...v, brandType: next };
+      if (willOrg) {
+        const primary = v.doctors.find((d) => d.trim()) ?? "";
+        const existing = v.doctors.map((d) => d.trim()).filter(Boolean);
+        return {
+          ...v,
+          brandType: next,
+          doctors: existing.length > 0 ? existing : primary ? [primary] : [""],
+        };
+      }
+      const primary = v.doctors.find((d) => d.trim()) ?? "";
+      return { ...v, brandType: next, doctors: [primary] };
+    });
+  }
+
+  function addDoctorRow(): void {
+    setValues((v) => ({ ...v, doctors: [...v.doctors, ""] }));
+  }
+
+  function updateDoctorAt(idx: number, name: string): void {
+    setValues((v) => {
+      const doctors = [...v.doctors];
+      doctors[idx] = name;
+      return { ...v, doctors };
+    });
+  }
+
+  function removeDoctorAt(idx: number): void {
+    setValues((v) => {
+      if (v.doctors.length <= 1) return { ...v, doctors: [""] };
+      return { ...v, doctors: v.doctors.filter((_, i) => i !== idx) };
+    });
+  }
+
   return (
     <form
       className="flex min-h-0 flex-col gap-4 pb-1"
       onSubmit={async (e) => {
         e.preventDefault();
-        await onSubmit(values);
+        const doctorName = doctorsToDoctorName(values.doctors, values.brandType);
+        if (!doctorName) return;
+        const clinicName =
+          isOrganization || values.clinicName.trim()
+            ? values.clinicName.trim() || values.name.trim()
+            : values.name.trim();
+        if (!clinicName) return;
+        await onSubmit({
+          ...values,
+          clinicName,
+        });
       }}
     >
+      <div className="space-y-3">
+        <div>
+          <Label>Client type</Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Clinic and hospital accounts can list multiple doctors. Individual is for a solo practitioner.
+          </p>
+          <div role="radiogroup" aria-label="Client type" className="mt-2 grid grid-cols-3 gap-2">
+            {CLIENT_TYPE_OPTIONS.map(({ value, label, icon: Icon }) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={values.brandType === value}
+                className={cn(
+                  "flex flex-col items-center gap-1.5 rounded-lg border px-2 py-3 text-sm font-medium transition-colors",
+                  values.brandType === value
+                    ? "border-primary bg-primary/10 text-primary shadow-sm"
+                    : "border-input bg-background text-foreground hover:bg-muted/50"
+                )}
+                onClick={() => setBrandType(value)}
+              >
+                <Icon className="h-5 w-5 shrink-0" aria-hidden />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2">
         <div>
           <Label htmlFor="name">Display name</Label>
@@ -272,29 +395,76 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
             required
           />
         </div>
-        <div>
-          <Label htmlFor="doctor">Doctor name</Label>
-          <Input
-            id="doctor"
-            value={values.doctorName}
-            onChange={(e) => setValues({ ...values, doctorName: e.target.value })}
-            required
-          />
-        </div>
-        <div>
-          <Label htmlFor="clinic">Clinic / brand name</Label>
-          <Input
-            id="clinic"
-            value={values.clinicName}
-            onChange={(e) => setValues({ ...values, clinicName: e.target.value })}
-            required
-          />
-        </div>
-        <div>
+        {isOrganization ? (
+          <div>
+            <Label htmlFor="clinic">
+              {values.brandType === "hospital" ? "Hospital name" : "Clinic name"}
+            </Label>
+            <Input
+              id="clinic"
+              value={values.clinicName}
+              onChange={(e) => setValues({ ...values, clinicName: e.target.value })}
+              required
+            />
+          </div>
+        ) : (
+          <div>
+            <Label htmlFor="doctor">Doctor name</Label>
+            <Input
+              id="doctor"
+              value={values.doctors[0] ?? ""}
+              onChange={(e) => updateDoctorAt(0, e.target.value)}
+              required
+            />
+          </div>
+        )}
+        <div className={isOrganization ? "md:col-span-2" : undefined}>
           <Label htmlFor="city">City</Label>
           <Input id="city" value={values.city} onChange={(e) => setValues({ ...values, city: e.target.value })} required />
         </div>
       </div>
+
+      {isOrganization ? (
+        <div className="space-y-2 rounded-lg border border-border/60 bg-muted/15 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <Label id="doctors-label">Doctors</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Add each doctor who posts under this {values.brandType === "hospital" ? "hospital" : "clinic"}.
+              </p>
+            </div>
+            <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={addDoctorRow}>
+              <UserPlus className="h-4 w-4" aria-hidden />
+              Add doctor
+            </Button>
+          </div>
+          <div role="group" aria-labelledby="doctors-label" className="space-y-2">
+            {values.doctors.map((doc, idx) => (
+              <div key={idx} className="flex gap-2">
+                <Input
+                  placeholder="e.g. Dr. Ananya Rao"
+                  value={doc}
+                  onChange={(e) => updateDoctorAt(idx, e.target.value)}
+                  required={idx === 0}
+                  aria-label={idx === 0 ? "Primary doctor name" : `Doctor ${idx + 1} name`}
+                />
+                {values.doctors.length > 1 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    aria-label={`Remove doctor ${idx + 1}`}
+                    onClick={() => removeDoctorAt(idx)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-4">
         <div>
@@ -753,30 +923,6 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
             </div>
           </div>
         )}
-      </div>
-
-      <div>
-        <Label>Brand type</Label>
-        <div className="mt-2 flex flex-wrap gap-4 text-sm">
-          {(
-            [
-              ["clinic", "Clinic"],
-              ["personal", "Personal"],
-              ["hospital", "Hospital"],
-            ] as const
-          ).map(([value, label]) => (
-            <label key={value} className="inline-flex items-center gap-2">
-              <input
-                type="radio"
-                name="brandType"
-                value={value}
-                checked={values.brandType === value}
-                onChange={() => setValues({ ...values, brandType: value })}
-              />
-              {label}
-            </label>
-          ))}
-        </div>
       </div>
 
       <Separator />

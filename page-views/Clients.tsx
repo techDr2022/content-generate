@@ -5,7 +5,7 @@ import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ClientList } from "@/components/clients/ClientList";
-import { ClientForm, type ClientFormValues } from "@/components/clients/ClientForm";
+import { ClientForm, doctorsToDoctorName, type ClientFormValues } from "@/components/clients/ClientForm";
 import { useClients, useCreateClient, useDeleteClient, useUpdateClient } from "@/hooks/useClients";
 import type { ClientDTO } from "@/lib/types";
 
@@ -58,7 +58,7 @@ export function ClientsPage() {
     }
     const payload = {
       name: values.name,
-      doctorName: values.doctorName,
+      doctorName: doctorsToDoctorName(values.doctors, values.brandType),
       clinicName: values.clinicName,
       city: values.city,
       specialty: values.specialty,
