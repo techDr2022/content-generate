@@ -1,6 +1,6 @@
 export type PostCode = "SP1" | "SP2" | "AWR";
 
-export type PostType = "Poster" | "Carousel";
+export type PostType = "Poster" | "Carousel" | "Animated";
 
 export interface CalendarPost {
   date: string;

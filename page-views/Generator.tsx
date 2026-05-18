@@ -14,6 +14,7 @@ import { useCancelJob, useEnqueueGenerate, useJob, useJobPreview, useSuggestSpec
 import type { GeneratePayload } from "@/hooks/useGenerator";
 import { useEnqueueBulkGenerate } from "@/hooks/useBulkExport";
 import { useJobProgress } from "@/hooks/useJobProgress";
+import { MAX_POSTS_PER_MONTH } from "@/lib/constants/cadence";
 import { formatDuration } from "@/lib/formatDuration";
 import { cn } from "@/lib/utils";
 import type { CalendarPost } from "@/lib/types";
@@ -81,6 +82,7 @@ export function GeneratorPage() {
   const [months, setMonths] = useState<number[]>([new Date().getMonth() + 1]);
   const [postOverride, setPostOverride] = useState<number | undefined>(undefined);
   const [carouselOverride, setCarouselOverride] = useState<number | undefined>(undefined);
+  const [animatedOverride, setAnimatedOverride] = useState<number | undefined>(undefined);
   const [manualSpecialDays, setManualSpecialDays] = useState<RunSpecialDay[]>([]);
   const [aiSuggestedDays, setAiSuggestedDays] = useState<RunSpecialDay[]>([]);
   const [aiSuggestedSelected, setAiSuggestedSelected] = useState<boolean[]>([]);
@@ -138,10 +140,15 @@ export function GeneratorPage() {
     }
     const seedPosts = selectedClient?.postsPerMonth ?? 15;
     const clientCar = selectedClient?.carouselsPerMonth ?? 0;
+    const clientAnim = selectedClient?.animatedPerMonth ?? 0;
     const resolvedCarousel =
       typeof carouselOverride === "number" ? carouselOverride : clientCar > 0 ? clientCar : 0;
-    const posterCustom = typeof postOverride === "number" && postOverride >= 1;
-    const minFromCadence = posterCustom ? postOverride! + resolvedCarousel : seedPosts;
+    const resolvedAnimated =
+      typeof animatedOverride === "number" ? animatedOverride : clientAnim > 0 ? clientAnim : 0;
+    const posterCustom = typeof postOverride === "number" && postOverride >= 0;
+    const minFromCadence = posterCustom
+      ? postOverride! + resolvedCarousel + resolvedAnimated
+      : seedPosts + (clientCar > 0 ? clientCar : 0) + (clientAnim > 0 ? clientAnim : 0);
     return Math.min(62, Math.max(1, maxSpecialsInAnyMonth, minFromCadence));
   }, [
     months,
@@ -151,29 +158,55 @@ export function GeneratorPage() {
     aiSuggestedSelected,
     postOverride,
     carouselOverride,
+    animatedOverride,
     selectedClient?.postsPerMonth,
     selectedClient?.carouselsPerMonth,
+    selectedClient?.animatedPerMonth,
   ]);
 
   /** Planned calendar row count (each row = one Poster or one Carousel), after specials floor. */
   const plannedTotalRows = useMemo(() => {
     const raw =
-      typeof postOverride === "number" && postOverride >= 1
+      typeof postOverride === "number" && postOverride >= 0
         ? Math.min(
             62,
-            postOverride + (typeof carouselOverride === "number" ? carouselOverride : 0)
+            postOverride +
+              (typeof carouselOverride === "number" ? carouselOverride : 0) +
+              (typeof animatedOverride === "number" ? animatedOverride : 0)
           )
-        : (selectedClient?.postsPerMonth ?? 15);
+        : Math.min(
+            62,
+            (selectedClient?.postsPerMonth ?? 15) +
+              (selectedClient?.carouselsPerMonth ?? 0) +
+              (selectedClient?.animatedPerMonth ?? 0)
+          );
     return Math.min(62, Math.max(raw, minRowsForSelectedMonths));
-  }, [postOverride, carouselOverride, selectedClient?.postsPerMonth, minRowsForSelectedMonths]);
+  }, [
+    postOverride,
+    carouselOverride,
+    animatedOverride,
+    selectedClient?.postsPerMonth,
+    selectedClient?.carouselsPerMonth,
+    selectedClient?.animatedPerMonth,
+    minRowsForSelectedMonths,
+  ]);
 
-  /** With custom poster count P, carousels only share the 62-row cap (specials bump total on generate, not carousel max). */
+  /** With custom poster count P, carousels and animated stack on top (max 10 each, 62 rows total). */
   const maxCarouselAllowed = useMemo(() => {
-    if (typeof postOverride === "number" && postOverride >= 1) {
-      return Math.max(0, 62 - postOverride);
+    const anim = typeof animatedOverride === "number" ? animatedOverride : 0;
+    if (typeof postOverride === "number" && postOverride >= 0) {
+      return Math.min(10, Math.max(0, 62 - postOverride - anim));
     }
-    return Math.min(62, plannedTotalRows);
-  }, [postOverride, plannedTotalRows]);
+    return Math.min(10, plannedTotalRows);
+  }, [postOverride, animatedOverride, plannedTotalRows]);
+
+  const maxAnimatedAllowed = useMemo(() => {
+    const car = typeof carouselOverride === "number" ? carouselOverride : 0;
+    if (typeof postOverride === "number" && postOverride >= 0) {
+      return Math.min(10, Math.max(0, 62 - postOverride - car));
+    }
+    return Math.min(10, plannedTotalRows);
+  }, [postOverride, carouselOverride, plannedTotalRows]);
 
   useEffect(() => {
     if (carouselOverride === undefined) return;
@@ -183,12 +216,21 @@ export function GeneratorPage() {
   }, [carouselOverride, maxCarouselAllowed]);
 
   useEffect(() => {
-    if (typeof postOverride !== "number" || postOverride < 1) return;
-    const c = typeof carouselOverride === "number" ? carouselOverride : 0;
-    if (postOverride + c > 62) {
-      setPostOverride(Math.max(1, 62 - c));
+    if (animatedOverride === undefined) return;
+    if (animatedOverride > maxAnimatedAllowed) {
+      setAnimatedOverride(maxAnimatedAllowed);
     }
-  }, [postOverride, carouselOverride]);
+  }, [animatedOverride, maxAnimatedAllowed]);
+
+  useEffect(() => {
+    if (typeof postOverride !== "number" || postOverride < 0) return;
+    const c = typeof carouselOverride === "number" ? carouselOverride : 0;
+    const a = typeof animatedOverride === "number" ? animatedOverride : 0;
+    const maxPoster = Math.min(MAX_POSTS_PER_MONTH, Math.max(0, 62 - c - a));
+    if (postOverride > maxPoster) {
+      setPostOverride(maxPoster);
+    }
+  }, [postOverride, carouselOverride, animatedOverride]);
 
   useEffect(() => {
     if (!batchActive) return undefined;
@@ -313,6 +355,7 @@ export function GeneratorPage() {
   useEffect(() => {
     setPostOverride(undefined);
     setCarouselOverride(undefined);
+    setAnimatedOverride(undefined);
   }, [clientId]);
 
   useEffect(() => {
@@ -423,23 +466,35 @@ export function GeneratorPage() {
     setCompletedIds(new Set());
     setRunStartedAt(null);
     setTick(0);
-    const clientDefault = selectedClient?.postsPerMonth ?? 15;
+    const clientDefault = Math.min(
+      62,
+      (selectedClient?.postsPerMonth ?? 15) +
+        (selectedClient?.carouselsPerMonth ?? 0) +
+        (selectedClient?.animatedPerMonth ?? 0)
+    );
     const clientCar = selectedClient?.carouselsPerMonth ?? 0;
-    const userWantsCustomPosters = typeof postOverride === "number" && postOverride >= 1;
+    const clientAnim = selectedClient?.animatedPerMonth ?? 0;
+    const userWantsCustomPosters = typeof postOverride === "number" && postOverride >= 0;
     const carouselAddon =
       typeof carouselOverride === "number"
         ? carouselOverride
         : userWantsCustomPosters && clientCar > 0
           ? clientCar
           : 0;
+    const animatedAddon =
+      typeof animatedOverride === "number"
+        ? animatedOverride
+        : userWantsCustomPosters && clientAnim > 0
+          ? clientAnim
+          : 0;
     const userRows = userWantsCustomPosters
-      ? Math.min(62, postOverride + carouselAddon)
+      ? Math.min(62, postOverride + carouselAddon + animatedAddon)
       : clientDefault;
     const finalRows = Math.min(62, Math.max(userRows, minRowsForSelectedMonths));
 
     if (finalRows > userRows) {
       setGenerationNotice(
-        `Using ${finalRows} total calendar rows for this run (minimum ${minRowsForSelectedMonths} for your selected special days, poster count, and carousel count).`
+        `Using ${finalRows} total calendar rows for this run (minimum ${minRowsForSelectedMonths} for your selected special days, posters, carousels, and animated posts).`
       );
       window.setTimeout(() => setGenerationNotice(null), 10_000);
     }
@@ -453,6 +508,9 @@ export function GeneratorPage() {
     }
     if (typeof carouselOverride === "number") {
       base.carouselCountOverride = carouselOverride;
+    }
+    if (typeof animatedOverride === "number") {
+      base.animatedCountOverride = animatedOverride;
     }
     try {
       if (months.length === 1) {
@@ -503,11 +561,14 @@ export function GeneratorPage() {
         onPostOverrideChange={setPostOverride}
         carouselOverride={carouselOverride}
         onCarouselOverrideChange={setCarouselOverride}
+        animatedOverride={animatedOverride}
+        onAnimatedOverrideChange={setAnimatedOverride}
         clientUseCarousels={selectedClient?.useCarousels}
         extraSpecialDays={manualSpecialDays}
         onExtraSpecialDaysChange={setManualSpecialDays}
         clientDefaultPosts={selectedClient?.postsPerMonth}
         clientDefaultCarousels={selectedClient?.carouselsPerMonth}
+        clientDefaultAnimated={selectedClient?.animatedPerMonth}
         clientLabel={selectedClient?.name}
         clientSpecialties={selectedClient?.specialty ?? []}
         suggestionMonth={months[0]}

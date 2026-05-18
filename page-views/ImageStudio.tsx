@@ -26,9 +26,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { useGeneratePosterImage, useJobCalendarRows } from "@/hooks/useGenerator";
 import { useJobs } from "@/hooks/useJobs";
+import { parseCustomPosterTexts } from "@/lib/posterCustomText";
 import { cn } from "@/lib/utils";
+
+type StudioMode = "calendar" | "custom";
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -62,8 +66,16 @@ interface BulkFail {
   message: string;
 }
 
+function customPosterLabel(text: string, index: number): string {
+  const firstLine = text.split(/\n/)[0]?.trim() ?? "";
+  if (firstLine.length > 48) return `Poster ${index + 1}: ${firstLine.slice(0, 45)}…`;
+  return firstLine ? `Poster ${index + 1}: ${firstLine}` : `Poster ${index + 1}`;
+}
+
 export function ImageStudioPage() {
   const jobs = useJobs();
+  const [studioMode, setStudioMode] = useState<StudioMode>("custom");
+  const [customTextBulk, setCustomTextBulk] = useState("");
   const [jobId, setJobId] = useState<string>("");
   const [posterLook, setPosterLook] = useState<PosterLookId>("text_only");
   const [posterLookCustom, setPosterLookCustom] = useState("");
@@ -122,30 +134,25 @@ export function ImageStudioPage() {
     [selectedIndices, rows]
   );
 
-  async function runBulkGenerate(): Promise<void> {
-    if (selectedRunnable.length === 0 || posterGenerateBlocked) return;
+  const customTexts = useMemo(() => parseCustomPosterTexts(customTextBulk), [customTextBulk]);
+
+  const showPosterSettings = studioMode === "custom" || (jobId.length > 0 && rows.length > 0);
+
+  async function runBulkForItems(
+    items: { rowIndex: number; text: string; label: string; fileSlug: string }[]
+  ): Promise<void> {
+    if (items.length === 0 || posterGenerateBlocked) return;
     setBulkRunning(true);
     setResults([]);
     setFailures([]);
-    setBulkTotal(selectedRunnable.length);
+    setBulkTotal(items.length);
     setBulkDone(0);
 
     const ok: BulkOk[] = [];
     const bad: BulkFail[] = [];
 
-    for (let step = 0; step < selectedRunnable.length; step++) {
-      const rowIndex = selectedRunnable[step]!;
-      const post = rows[rowIndex];
-      const text = post?.textInImage?.trim();
-      if (!text) {
-        bad.push({
-          rowIndex,
-          date: post?.date ?? "—",
-          message: "Empty Text in image",
-        });
-        setBulkDone(step + 1);
-        continue;
-      }
+    for (let step = 0; step < items.length; step++) {
+      const { rowIndex, text, label, fileSlug } = items[step]!;
 
       try {
         const data = await generateImage.mutateAsync({
@@ -155,17 +162,17 @@ export function ImageStudioPage() {
           ...imageOutput,
           ...posterBrandPayloadFromState(brandAssets),
         });
-        const safeDate = (post.date ?? `row-${rowIndex}`).replace(/[^\w\-]+/g, "_");
+        const safeSlug = fileSlug.replace(/[^\w\-]+/g, "_");
         ok.push({
           rowIndex,
-          date: post.date,
+          date: label,
           src: `data:${data.mimeType};base64,${data.imageBase64}`,
-          fileName: `poster-${safeDate}.${extFromMime(data.mimeType)}`,
+          fileName: `poster-${safeSlug}.${extFromMime(data.mimeType)}`,
         });
       } catch (e) {
         bad.push({
           rowIndex,
-          date: post.date,
+          date: label,
           message: e instanceof Error ? e.message : String(e),
         });
       }
@@ -179,63 +186,57 @@ export function ImageStudioPage() {
     setBulkRunning(false);
   }
 
+  async function runBulkGenerate(): Promise<void> {
+    const items = selectedRunnable
+      .map((rowIndex) => {
+        const post = rows[rowIndex];
+        const text = post?.textInImage?.trim();
+        if (!text) return null;
+        return {
+          rowIndex,
+          text,
+          label: post?.date ?? "—",
+          fileSlug: post?.date ?? `row-${rowIndex}`,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+    await runBulkForItems(items);
+  }
+
+  async function runCustomBulkGenerate(): Promise<void> {
+    const items = customTexts.map((text, index) => ({
+      rowIndex: index,
+      text,
+      label: customPosterLabel(text, index),
+      fileSlug: `custom-${index + 1}`,
+    }));
+    await runBulkForItems(items);
+  }
+
   const previewErrorMsg = rowsQuery.error instanceof Error ? rowsQuery.error.message : "";
   const previewNeedsLocalHint =
     previewErrorMsg.includes("LOCAL") || previewErrorMsg.includes("Preview is only");
 
+  const customGenerateLabel =
+    customTexts.length === 0
+      ? "Generate posters"
+      : `Generate ${customTexts.length} poster${customTexts.length === 1 ? "" : "s"}`;
+
   return (
     <PageWrapper
       title="Poster images"
-      description="Load recent completed calendars, pick rows, and generate healthcare posters in bulk from Text in image."
+      description="Create your own posters in bulk with custom text, or generate from a completed calendar job."
       className="max-w-7xl"
     >
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Recent calendar</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Chooses the latest completed generator jobs. Preview requires{" "}
-            <span className="font-medium text-foreground">local workbook storage</span> on the server (same as Generator
-            preview).
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="studio-job">Completed job</Label>
-            <Select
-              value={jobId || undefined}
-              onValueChange={(v) => setJobId(v)}
-              disabled={recentDoneJobs.length === 0}
-            >
-              <SelectTrigger id="studio-job" className="max-w-xl">
-                <SelectValue placeholder={recentDoneJobs.length ? "Select a job…" : "No completed jobs yet"} />
-              </SelectTrigger>
-              <SelectContent>
-                {recentDoneJobs.map((j) => (
-                  <SelectItem key={j.id} value={j.id}>
-                    {jobLabel(j)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {jobId && rowsQuery.isLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              Loading rows…
-            </div>
-          ) : null}
-
-          {jobId && rowsQuery.isError ? (
-            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {rowsQuery.error instanceof Error ? rowsQuery.error.message : "Could not load calendar"}
-              {previewNeedsLocalHint
-                ? " — Calendar preview needs STORAGE_TYPE=LOCAL on the API so workbooks stay on disk."
-                : null}
+      {showPosterSettings ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Poster settings</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Look, brand assets, and output options apply to calendar rows and custom text alike.
             </p>
-          ) : null}
-
-          {jobId && rows.length > 0 ? (
+          </CardHeader>
+          <CardContent>
             <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
               <div className="space-y-4">
                 <PosterLookControls
@@ -257,11 +258,160 @@ export function ImageStudioPage() {
                 />
               </div>
             </div>
-          ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle className="text-lg">
+                {studioMode === "custom" ? "Bulk poster text" : "Calendar source"}
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                {studioMode === "calendar"
+                  ? "Load a completed generator job and pick rows."
+                  : "Paste one or more posters below, then generate them all at once. No calendar job needed."}
+              </p>
+            </div>
+            <div className="flex shrink-0 rounded-lg border p-0.5" role="group" aria-label="Poster source">
+              <Button
+                type="button"
+                size="sm"
+                variant={studioMode === "custom" ? "default" : "ghost"}
+                className="rounded-md"
+                disabled={bulkRunning}
+                onClick={() => setStudioMode("custom")}
+              >
+                My posters (bulk)
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={studioMode === "calendar" ? "default" : "ghost"}
+                className="rounded-md"
+                disabled={bulkRunning}
+                onClick={() => setStudioMode("calendar")}
+              >
+                From calendar
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {studioMode === "calendar" ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Chooses the latest completed generator jobs. Preview requires{" "}
+                <span className="font-medium text-foreground">local workbook storage</span> on the server (same as
+                Generator preview).
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="studio-job">Completed job</Label>
+                <Select
+                  value={jobId || undefined}
+                  onValueChange={(v) => setJobId(v)}
+                  disabled={recentDoneJobs.length === 0}
+                >
+                  <SelectTrigger id="studio-job" className="max-w-xl">
+                    <SelectValue placeholder={recentDoneJobs.length ? "Select a job…" : "No completed jobs yet"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {recentDoneJobs.map((j) => (
+                      <SelectItem key={j.id} value={j.id}>
+                        {jobLabel(j)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {jobId && rowsQuery.isLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  Loading rows…
+                </div>
+              ) : null}
+
+              {jobId && rowsQuery.isError ? (
+                <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {rowsQuery.error instanceof Error ? rowsQuery.error.message : "Could not load calendar"}
+                  {previewNeedsLocalHint
+                    ? " — Calendar preview needs STORAGE_TYPE=LOCAL on the API so workbooks stay on disk."
+                    : null}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="studio-custom-text">Poster text</Label>
+                <Textarea
+                  id="studio-custom-text"
+                  value={customTextBulk}
+                  onChange={(e) => setCustomTextBulk(e.target.value)}
+                  disabled={bulkRunning}
+                  placeholder={`Heart health matters.\n\nBook an appointment\nSunrise Clinic\nAustin\n\n---\n\nSecond poster headline…`}
+                  className="min-h-[200px] font-mono text-xs leading-relaxed"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Use line breaks for multi-line posters. For multiple posters, put a line with only{" "}
+                  <span className="font-medium text-foreground">---</span> between each block.
+                  {customTexts.length > 0 ? ` ${customTexts.length} poster(s) ready to generate.` : ""}
+                </p>
+              </div>
+
+              {customTexts.length > 0 ? (
+                <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+                  <p className="text-xs font-medium text-foreground">Preview ({customTexts.length})</p>
+                  <ul className="max-h-48 space-y-2 overflow-y-auto">
+                    {customTexts.map((text, index) => (
+                      <li
+                        key={index}
+                        className="rounded border bg-background px-2.5 py-2 text-xs text-muted-foreground whitespace-pre-wrap"
+                      >
+                        <span className="font-medium text-foreground">Poster {index + 1}</span>
+                        <span className="mx-1">·</span>
+                        {text.length > 160 ? `${text.slice(0, 157)}…` : text}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <Button
+                  type="button"
+                  className="gap-2"
+                  disabled={bulkRunning || customTexts.length === 0 || posterGenerateBlocked}
+                  onClick={() => void runCustomBulkGenerate()}
+                >
+                  {bulkRunning ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <ImageIcon className="h-4 w-4" aria-hidden />
+                  )}
+                  {bulkRunning ? `Generating ${bulkDone} / ${bulkTotal}…` : customGenerateLabel}
+                </Button>
+                {posterGenerateBlocked ? (
+                  <p className="text-xs text-destructive">Add custom instructions or choose another poster look.</p>
+                ) : null}
+              </div>
+              {bulkRunning || bulkTotal > 0 ? (
+                <div className="space-y-2">
+                  <Progress value={bulkTotal ? Math.round((bulkDone / bulkTotal) * 100) : 0} className="h-2" />
+                  <p className="text-xs text-muted-foreground">
+                    Images are requested one at a time to reduce API rate limits (~15–45s each).
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {jobId && rows.length > 0 ? (
+      {studioMode === "calendar" && jobId && rows.length > 0 ? (
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -284,9 +434,7 @@ export function ImageStudioPage() {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() =>
-                  setSelected(new Set(rows.map((_, i) => i)))
-                }
+                onClick={() => setSelected(new Set(rows.map((_, i) => i)))}
                 disabled={bulkRunning}
               >
                 Select all rows
@@ -353,7 +501,7 @@ export function ImageStudioPage() {
               ) : null}
             </div>
 
-            {bulkRunning || (bulkTotal > 0 && !bulkRunning) ? (
+            {bulkRunning || bulkTotal > 0 ? (
               <div className="space-y-2">
                 <Progress value={bulkTotal ? Math.round((bulkDone / bulkTotal) * 100) : 0} className="h-2" />
                 <p className="text-xs text-muted-foreground">

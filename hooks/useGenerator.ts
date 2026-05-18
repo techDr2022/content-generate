@@ -10,6 +10,7 @@ export interface GeneratePayload {
   year: number;
   postCountOverride?: number;
   carouselCountOverride?: number;
+  animatedCountOverride?: number;
   extraSpecialDays?: { label: string; date: string; type: "festival" | "awareness" | "campaign" }[];
 }
 

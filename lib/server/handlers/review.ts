@@ -246,6 +246,7 @@ export async function verifyReviewSessionHandler(sessionId: string, req: Request
 function mapPostTypeBadge(postType: string, specialDay: string | null): string {
   if (specialDay?.trim()) return "Special Day";
   if (postType === "Carousel") return "Carousel";
+  if (postType === "Animated") return "Animated";
   return "Poster";
 }
 

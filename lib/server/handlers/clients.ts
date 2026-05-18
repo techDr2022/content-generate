@@ -1,5 +1,11 @@
 import { z } from "zod";
 import {
+  MAX_ANIMATED_PER_MONTH,
+  MAX_CALENDAR_ROWS_PER_MONTH,
+  MAX_CAROUSELS_PER_MONTH,
+  MAX_POSTS_PER_MONTH,
+} from "@/lib/constants/cadence";
+import {
   MEDICAL_SPECIALTIES,
   validateClientServices,
   isValidCustomSpecialtyName,
@@ -27,15 +33,22 @@ const specialDaySchema = z.object({
 function normalizePostsPerMonth(val: unknown): unknown {
   if (val === undefined || val === null) return undefined;
   const n = typeof val === "string" ? Number(val) : Number(val);
-  if (!Number.isFinite(n) || n < 1) return 15;
-  return Math.min(62, Math.floor(n));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(MAX_POSTS_PER_MONTH, Math.floor(n));
 }
 
 function normalizeCarouselsPerMonth(val: unknown): unknown {
   if (val === undefined || val === null) return undefined;
   const n = typeof val === "string" ? Number(val) : Number(val);
   if (!Number.isFinite(n) || n < 0) return 0;
-  return Math.min(62, Math.floor(n));
+  return Math.min(MAX_CAROUSELS_PER_MONTH, Math.floor(n));
+}
+
+function normalizeAnimatedPerMonth(val: unknown): unknown {
+  if (val === undefined || val === null) return undefined;
+  const n = typeof val === "string" ? Number(val) : Number(val);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(MAX_ANIMATED_PER_MONTH, Math.floor(n));
 }
 
 const clientBody = z.object({
@@ -64,8 +77,18 @@ const clientBody = z.object({
   clinicName: z.string().min(1),
   city: z.string().min(1),
   brandType: z.enum(["clinic", "personal", "hospital"]),
-  postsPerMonth: z.preprocess(normalizePostsPerMonth, z.number().int().min(1).max(62).optional()),
-  carouselsPerMonth: z.preprocess(normalizeCarouselsPerMonth, z.number().int().min(0).max(62).optional()),
+  postsPerMonth: z.preprocess(
+    normalizePostsPerMonth,
+    z.number().int().min(0).max(MAX_POSTS_PER_MONTH).optional()
+  ),
+  carouselsPerMonth: z.preprocess(
+    normalizeCarouselsPerMonth,
+    z.number().int().min(0).max(MAX_CAROUSELS_PER_MONTH).optional()
+  ),
+  animatedPerMonth: z.preprocess(
+    normalizeAnimatedPerMonth,
+    z.number().int().min(0).max(MAX_ANIMATED_PER_MONTH).optional()
+  ),
   useCarousels: z.boolean().optional(),
   notes: z.string().nullable().optional(),
   supportingTextDefault: z.string().max(8000).nullable().optional(),
@@ -81,9 +104,21 @@ function assertServicesValid(services: string[], specialty: string[]): void {
   }
 }
 
-function assertCadence(postsPerMonth: number, carouselsPerMonth: number): void {
-  if (carouselsPerMonth > postsPerMonth) {
-    throw new HttpError(400, "Carousels for month cannot exceed posts per month.");
+function assertCadence(postsPerMonth: number, carouselsPerMonth: number, animatedPerMonth: number): void {
+  if (postsPerMonth > MAX_POSTS_PER_MONTH) {
+    throw new HttpError(400, `Posts per month cannot exceed ${MAX_POSTS_PER_MONTH}.`);
+  }
+  if (carouselsPerMonth > MAX_CAROUSELS_PER_MONTH) {
+    throw new HttpError(400, `Carousels for month cannot exceed ${MAX_CAROUSELS_PER_MONTH}.`);
+  }
+  if (animatedPerMonth > MAX_ANIMATED_PER_MONTH) {
+    throw new HttpError(400, `Animated posts per month cannot exceed ${MAX_ANIMATED_PER_MONTH}.`);
+  }
+  if (postsPerMonth + carouselsPerMonth + animatedPerMonth > MAX_CALENDAR_ROWS_PER_MONTH) {
+    throw new HttpError(
+      400,
+      `Posts, carousels, and animated posts combined cannot exceed ${MAX_CALENDAR_ROWS_PER_MONTH} rows per month.`
+    );
   }
 }
 
@@ -130,7 +165,8 @@ export async function createClient(userId: string, body: unknown) {
   assertServicesValid(parsed.services, parsed.specialty);
   const postsPerMonth = parsed.postsPerMonth ?? 15;
   const carouselsPerMonth = parsed.carouselsPerMonth ?? 0;
-  assertCadence(postsPerMonth, carouselsPerMonth);
+  const animatedPerMonth = parsed.animatedPerMonth ?? 0;
+  assertCadence(postsPerMonth, carouselsPerMonth, animatedPerMonth);
   const client = await prisma.client.create({
     data: {
       name: parsed.name,
@@ -142,6 +178,7 @@ export async function createClient(userId: string, body: unknown) {
       brandType: parsed.brandType,
       postsPerMonth,
       carouselsPerMonth,
+      animatedPerMonth,
       useCarousels: (parsed.useCarousels ?? false) || carouselsPerMonth > 0,
       notes: parsed.notes ?? null,
       supportingTextDefault: parsed.supportingTextDefault ?? null,
@@ -176,7 +213,8 @@ export async function updateClient(userId: string, id: string, body: unknown) {
 
   const nextPosts = parsed.postsPerMonth ?? existing.postsPerMonth;
   const nextCarousels = parsed.carouselsPerMonth ?? existing.carouselsPerMonth;
-  assertCadence(nextPosts, nextCarousels);
+  const nextAnimated = parsed.animatedPerMonth ?? existing.animatedPerMonth;
+  assertCadence(nextPosts, nextCarousels, nextAnimated);
 
   if (parsed.specialDays) {
     await prisma.specialDay.deleteMany({ where: { clientId: existing.id } });
@@ -194,6 +232,7 @@ export async function updateClient(userId: string, id: string, body: unknown) {
       brandType: parsed.brandType ?? existing.brandType,
       postsPerMonth: parsed.postsPerMonth ?? existing.postsPerMonth,
       carouselsPerMonth: parsed.carouselsPerMonth ?? existing.carouselsPerMonth,
+      animatedPerMonth: parsed.animatedPerMonth ?? existing.animatedPerMonth,
       useCarousels: parsed.useCarousels ?? existing.useCarousels,
       notes: parsed.notes === undefined ? existing.notes : parsed.notes,
       supportingTextDefault:

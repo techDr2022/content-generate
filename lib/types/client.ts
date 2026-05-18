@@ -109,10 +109,13 @@ export interface ClientDTO {
   clinicName: string;
   city: string;
   brandType: BrandType;
+  /** Single-image Poster rows per month (0–30). */
   postsPerMonth: number;
-  /** Fixed Carousel rows within postsPerMonth (omit or 0 = none fixed). */
+  /** Fixed Carousel rows per month (0–10), added on top of postsPerMonth poster rows. */
   carouselsPerMonth?: number;
   useCarousels: boolean;
+  /** Fixed Animated rows per month (0–10), added on top of posters and carousels. */
+  animatedPerMonth?: number;
   notes: string | null;
   /** If set, generation inserts this verbatim immediately before the hashtag block in supporting text. */
   supportingTextDefault: string | null;

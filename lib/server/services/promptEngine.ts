@@ -16,6 +16,11 @@ export interface ClientPromptProfile {
    * Omitted = use `useCarousels` only (no fixed carousel count).
    */
   carouselCountForRun?: number;
+  /**
+   * When set (0…postsPerMonth), this run must contain exactly this many `Animated` rows.
+   * Omitted = no fixed animated count.
+   */
+  animatedCountForRun?: number;
   notes: string | null;
   /** Verbatim block inserted immediately before the hashtag section when non-empty. */
   supportingTextDefault: string | null;
@@ -91,16 +96,21 @@ export function buildPrompt(
   const specialDaysBlock = formatSpecialDays(specialDays);
 
   const carouselCountHard = typeof client.carouselCountForRun === "number";
+  const animatedCountHard = typeof client.animatedCountForRun === "number";
   const carouselN = carouselCountHard ? client.carouselCountForRun! : 0;
-  const posterRemainder = Math.max(0, client.postsPerMonth - carouselN);
+  const animatedN = animatedCountHard ? client.animatedCountForRun! : 0;
+  const posterRemainder = Math.max(0, client.postsPerMonth - carouselN - animatedN);
+  const typeCountsHard = carouselCountHard || animatedCountHard;
   /** One Messages response must hold the full array; large months need shorter fields. */
   const compactCalendar = client.postsPerMonth >= 9;
 
-  const postTypeBlock = carouselCountHard
-    ? carouselN === 0
+  const postTypeBlock = typeCountsHard
+    ? carouselN === 0 && animatedN === 0
       ? `- THIS RUN (hard requirement): Every row must have "type": "Poster" (total ${client.postsPerMonth} rows).`
-      : `- THIS RUN (hard requirement): Exactly ${carouselN} row(s) must have "type": "Carousel" and exactly ${posterRemainder} row(s) must have "type": "Poster" (totals must match client.postsPerMonth = ${client.postsPerMonth}).
-- Carousels must use suitable styles: step-by-step, comparisons, Do's & Don'ts, educational breakdowns; use "Poster" for other style intents.`
+      : `- THIS RUN (hard requirement): Exactly ${carouselN} row(s) "Carousel", exactly ${animatedN} row(s) "Animated", and exactly ${posterRemainder} row(s) "Poster" (total ${client.postsPerMonth}).
+- Carousels: step-by-step, comparisons, Do's & Don'ts, educational breakdowns.
+- Animated: motion-friendly reels-style tips, short procedure highlights, before/after concepts, dynamic educational clips.
+- Use "Poster" for other style intents.`
     : `- Use carousels ONLY if client.useCarousels = true, and only for: step-by-step, comparisons, Do's & Don'ts, educational breakdowns
 - All others = Poster`;
 
@@ -240,7 +250,7 @@ Value types (real JSON — not schema shorthand):
 - "date": string, format "DD MMM YYYY" (e.g. "05 June 2026").
 - "code": string, one of "SP1", "SP2", "AWR" only.
 - "department": string.
-- "type": string, one of "Poster", "Carousel" only.
+- "type": string, one of "Poster", "Carousel", "Animated" only.
 - "style": string (style name from the list in this prompt).
 - "textInImage", "supportingText", "topic": strings.
 - "isAIAdded": JSON boolean true or false (never quoted).
@@ -340,12 +350,12 @@ TECHDR COMPLIANCE (this client)
   }`;
 
   const runConstraintLines: string[] = [];
-  if (carouselCountHard) {
-    if (carouselN === 0) {
+  if (typeCountsHard) {
+    if (carouselN === 0 && animatedN === 0) {
       runConstraintLines.push('ALL rows in this JSON must use "type":"Poster" only.');
     } else {
       runConstraintLines.push(
-        `Exactly ${carouselN} row(s) must use "type":"Carousel" and exactly ${posterRemainder} row(s) must use "type":"Poster" (total ${client.postsPerMonth}). Wrong counts invalidate the output.`
+        `Exactly ${carouselN} "Carousel", ${animatedN} "Animated", and ${posterRemainder} "Poster" rows (total ${client.postsPerMonth}). Wrong counts invalidate the output.`
       );
     }
   }
@@ -381,6 +391,7 @@ ${JSON.stringify(
       postsPerMonth: client.postsPerMonth,
       useCarousels: client.useCarousels,
       ...(carouselCountHard ? { carouselCountForRun: carouselN } : {}),
+      ...(animatedCountHard ? { animatedCountForRun: animatedN } : {}),
       notes: client.notes,
       supportingTextDefault: client.supportingTextDefault,
     },

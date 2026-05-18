@@ -7,13 +7,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ClientList } from "@/components/clients/ClientList";
 import { ClientForm, doctorsToDoctorName, type ClientFormValues } from "@/components/clients/ClientForm";
 import { useClients, useCreateClient, useDeleteClient, useUpdateClient } from "@/hooks/useClients";
+import { normalizeClientCadence } from "@/lib/cadenceClamps";
 import type { ClientDTO } from "@/lib/types";
-
-function clampPostsPerMonth(n: unknown): number {
-  const v = typeof n === "number" ? n : Number(n);
-  if (!Number.isFinite(v) || v < 1) return 15;
-  return Math.min(62, Math.floor(v));
-}
 
 function apiErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
@@ -63,13 +58,11 @@ export function ClientsPage() {
       city: values.city,
       specialty: values.specialty,
       brandType: values.brandType,
-      postsPerMonth: clampPostsPerMonth(values.postsPerMonth),
-      carouselsPerMonth: (() => {
-        const posts = clampPostsPerMonth(values.postsPerMonth);
-        const raw = typeof values.carouselsPerMonth === "number" ? values.carouselsPerMonth : Number(values.carouselsPerMonth);
-        const c = Number.isFinite(raw) ? Math.floor(raw) : 0;
-        return Math.min(posts, 62, Math.max(0, c));
-      })(),
+      ...normalizeClientCadence(
+        values.postsPerMonth,
+        values.carouselsPerMonth,
+        values.animatedPerMonth
+      ),
       useCarousels: values.useCarousels,
       notes: values.notes || null,
       supportingTextDefault: values.supportingTextDefault.trim() || null,

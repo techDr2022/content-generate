@@ -19,6 +19,8 @@ interface GeneratorFormProps {
   onPostOverrideChange: (v: number | undefined) => void;
   carouselOverride?: number;
   onCarouselOverrideChange: (v: number | undefined) => void;
+  animatedOverride?: number;
+  onAnimatedOverrideChange: (v: number | undefined) => void;
   clientUseCarousels?: boolean;
   extraSpecialDays: RunSpecialDay[];
   onExtraSpecialDaysChange: (rows: RunSpecialDay[]) => void;
@@ -26,6 +28,7 @@ interface GeneratorFormProps {
   clientDefaultPosts?: number;
   /** Fixed carousel rows saved on the client (subset of monthly rows). */
   clientDefaultCarousels?: number;
+  clientDefaultAnimated?: number;
   clientLabel?: string;
   clientSpecialties?: string[];
   /** First selected month (for AI suggestions) */
@@ -59,11 +62,14 @@ export function GeneratorForm({
   onPostOverrideChange,
   carouselOverride,
   onCarouselOverrideChange,
+  animatedOverride,
+  onAnimatedOverrideChange,
   clientUseCarousels,
   extraSpecialDays,
   onExtraSpecialDaysChange,
   clientDefaultPosts,
   clientDefaultCarousels,
+  clientDefaultAnimated,
   clientLabel,
   clientSpecialties,
   suggestionMonth,
@@ -122,6 +128,9 @@ export function GeneratorForm({
         clientUseCarousels={clientUseCarousels}
         carouselValue={carouselOverride}
         onCarouselChange={onCarouselOverrideChange}
+        clientDefaultAnimated={clientDefaultAnimated}
+        animatedValue={animatedOverride}
+        onAnimatedChange={onAnimatedOverrideChange}
         minRowsFromSelections={minRowsFromSelections}
       />
       {showSuggestedSpecialDays &&

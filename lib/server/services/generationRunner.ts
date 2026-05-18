@@ -1,6 +1,7 @@
 import { UnrecoverableError } from "bullmq";
 import { z } from "zod";
 import type { SpecialDay, TopicHistory, GenerationJob } from "@prisma/client";
+import { MAX_ANIMATED_PER_MONTH, MAX_CAROUSELS_PER_MONTH } from "@/lib/constants/cadence";
 import type { CalendarPost, GenerateJobPayload } from "@/lib/types";
 import type { SpecialDayInput } from "@/lib/types";
 import { prisma } from "../prisma";
@@ -16,7 +17,7 @@ const calendarPostSchema = z.object({
   date: z.string(),
   code: z.enum(["SP1", "SP2", "AWR"]),
   department: z.string(),
-  type: z.enum(["Poster", "Carousel"]),
+  type: z.enum(["Poster", "Carousel", "Animated"]),
   style: z.string(),
   textInImage: z.string(),
   supportingText: z.string(),
@@ -160,7 +161,17 @@ export async function executeGenerationJob(
   data: GenerateJobPayload,
   progress: GenerationProgress
 ): Promise<{ fileUrl: string }> {
-  const { jobId, clientId, month, year, userId, postCountOverride, carouselCountOverride, extraSpecialDays } = data;
+  const {
+    jobId,
+    clientId,
+    month,
+    year,
+    userId,
+    postCountOverride,
+    carouselCountOverride,
+    animatedCountOverride,
+    extraSpecialDays,
+  } = data;
   const runStarted = Date.now();
 
   try {
@@ -232,10 +243,18 @@ export async function executeGenerationJob(
       }));
     const mergedSpecials = mergeSpecialDaysByDate(dbSpecials, extraMapped);
 
+    const clientCarouselDefault =
+      typeof client.carouselsPerMonth === "number" && client.carouselsPerMonth > 0
+        ? Math.min(MAX_CAROUSELS_PER_MONTH, Math.round(client.carouselsPerMonth))
+        : 0;
+    const clientAnimatedDefault =
+      typeof client.animatedPerMonth === "number" && client.animatedPerMonth > 0
+        ? Math.min(MAX_ANIMATED_PER_MONTH, Math.round(client.animatedPerMonth))
+        : 0;
     const basePosts =
       typeof postCountOverride === "number" && postCountOverride > 0
         ? postCountOverride
-        : client.postsPerMonth;
+        : client.postsPerMonth + clientCarouselDefault + clientAnimatedDefault;
     /** Each listed special day needs its own post; cap was impossible for Claude when specials > monthly target. */
     const effectivePosts = Math.max(basePosts, mergedSpecials.length);
 
@@ -257,11 +276,24 @@ export async function executeGenerationJob(
     const carouselRaw =
       typeof carouselCountOverride === "number" && Number.isFinite(carouselCountOverride)
         ? Math.round(carouselCountOverride)
-        : typeof client.carouselsPerMonth === "number" && client.carouselsPerMonth > 0
-          ? Math.round(client.carouselsPerMonth)
+        : clientCarouselDefault > 0
+          ? clientCarouselDefault
           : undefined;
     const carouselForRun =
-      carouselRaw !== undefined ? Math.min(Math.max(0, carouselRaw), effectivePosts) : undefined;
+      carouselRaw !== undefined
+        ? Math.min(Math.max(0, carouselRaw), MAX_CAROUSELS_PER_MONTH, effectivePosts)
+        : undefined;
+
+    const animatedRaw =
+      typeof animatedCountOverride === "number" && Number.isFinite(animatedCountOverride)
+        ? Math.round(animatedCountOverride)
+        : clientAnimatedDefault > 0
+          ? clientAnimatedDefault
+          : undefined;
+    const animatedForRun =
+      animatedRaw !== undefined
+        ? Math.min(Math.max(0, animatedRaw), MAX_ANIMATED_PER_MONTH, effectivePosts)
+        : undefined;
 
     const profile = {
       name: client.name,
@@ -274,6 +306,7 @@ export async function executeGenerationJob(
       postsPerMonth: effectivePosts,
       useCarousels: carouselForRun !== undefined ? carouselForRun > 0 : client.useCarousels,
       carouselCountForRun: carouselForRun,
+      animatedCountForRun: animatedForRun,
       notes: client.notes,
       supportingTextDefault: client.supportingTextDefault ?? null,
     };
@@ -285,7 +318,9 @@ export async function executeGenerationJob(
       effectivePosts,
       mergedSpecialDayCount: mergedSpecials.length,
       carouselCountOverride: data.carouselCountOverride,
+      animatedCountOverride: data.animatedCountOverride,
       carouselForRun,
+      animatedForRun,
     });
 
     await progress.updateProgress({ step: "prompt_sent", pct: 10 });
@@ -433,6 +468,7 @@ export function generationJobRowToPayload(row: GenerationJob): GenerateJobPayloa
   const p = row.payload as {
     postCountOverride?: number;
     carouselCountOverride?: number;
+    animatedCountOverride?: number;
     extraSpecialDays?: GenerateJobPayload["extraSpecialDays"];
   } | null;
   return {
@@ -443,6 +479,7 @@ export function generationJobRowToPayload(row: GenerationJob): GenerateJobPayloa
     userId: row.userId,
     postCountOverride: p?.postCountOverride,
     carouselCountOverride: p?.carouselCountOverride,
+    animatedCountOverride: p?.animatedCountOverride,
     extraSpecialDays: p?.extraSpecialDays,
   };
 }

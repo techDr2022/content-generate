@@ -1,4 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { MAX_POSTS_PER_MONTH } from "@/lib/constants/cadence";
+import {
+  clampAnimatedPerMonth,
+  clampCarouselsPerMonth,
+  maxAnimatedForCadence,
+  maxCarouselsForCadence,
+  normalizeClientCadence,
+} from "@/lib/cadenceClamps";
 import type { ClientDTO, SpecialDayDTO } from "@/lib/types";
 import {
   getAvailableServicesForSpecialties,
@@ -33,7 +41,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
+import type { ClientSpecialDaySuggestion } from "@/hooks/useClients";
 import { useSuggestServices } from "@/hooks/useClients";
+import { ClientSuggestedSpecialDaysPanel } from "@/components/clients/ClientSuggestedSpecialDaysPanel";
 import { cn } from "@/lib/utils";
 import type { BrandType } from "@/lib/types";
 
@@ -77,6 +87,7 @@ export interface ClientFormValues {
   postsPerMonth: number;
   /** Carousel-type rows within postsPerMonth (0 = no fixed count on the profile). */
   carouselsPerMonth: number;
+  animatedPerMonth: number;
   useCarousels: boolean;
   notes: string;
   /** Verbatim block placed before hashtags in generated supporting text */
@@ -90,15 +101,29 @@ function sanitizeServicesForSpecialties(services: string[], specialty: string[])
   return services.filter((s) => allowed.has(s) || isValidCustomServiceName(s));
 }
 
-/** Keep posts/month in range; used on blur and when the number input is cleared. */
-function clampPostsPerMonthState(n: number): number {
-  if (!Number.isFinite(n) || n < 1) return 15;
-  return Math.min(62, Math.floor(n));
+function applyCadenceToForm(
+  values: ClientFormValues,
+  posts: number
+): Pick<ClientFormValues, "postsPerMonth" | "carouselsPerMonth" | "animatedPerMonth"> {
+  const normalized = normalizeClientCadence(posts, values.carouselsPerMonth, values.animatedPerMonth);
+  return normalized;
 }
 
-function clampCarouselsState(carousels: number, postsPerMonth: number): number {
-  if (!Number.isFinite(carousels) || carousels < 0) return 0;
-  return Math.min(62, postsPerMonth, Math.floor(carousels));
+function mergeSpecialDaysIntoForm(
+  existing: ClientFormValues["specialDays"],
+  toAdd: ClientSpecialDaySuggestion[]
+): ClientFormValues["specialDays"] {
+  const seen = new Set(existing.map((s) => `${s.date}|${s.label.trim().toLowerCase()}`));
+  const merged = [...existing];
+  for (const row of toAdd) {
+    const label = row.label.trim();
+    if (!label || !row.date) continue;
+    const key = `${row.date}|${label.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ label, date: row.date, type: row.type });
+  }
+  return merged.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 interface ClientFormProps {
@@ -122,6 +147,7 @@ function mapInitial(client: ClientDTO | null | undefined): ClientFormValues {
       brandType: "clinic",
       postsPerMonth: 15,
       carouselsPerMonth: 0,
+      animatedPerMonth: 0,
       useCarousels: false,
       notes: "",
       supportingTextDefault: "",
@@ -136,8 +162,11 @@ function mapInitial(client: ClientDTO | null | undefined): ClientFormValues {
     specialty: [...client.specialty],
     services: sanitizeServicesForSpecialties([...(client.services ?? [])], client.specialty),
     brandType: client.brandType as ClientFormValues["brandType"],
-    postsPerMonth: clampPostsPerMonthState(client.postsPerMonth),
-    carouselsPerMonth: clampCarouselsState(client.carouselsPerMonth ?? 0, clampPostsPerMonthState(client.postsPerMonth)),
+    ...normalizeClientCadence(
+      client.postsPerMonth,
+      client.carouselsPerMonth ?? 0,
+      client.animatedPerMonth ?? 0
+    ),
     useCarousels: client.useCarousels,
     notes: client.notes ?? "",
     supportingTextDefault: client.supportingTextDefault ?? "",
@@ -298,6 +327,17 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
     !customSpecIsDup;
 
   const isOrganization = isOrganizationBrand(values.brandType);
+
+  const clinicNameForSuggestions =
+    (isOrganization ? values.clinicName.trim() || values.name.trim() : values.name.trim()) ||
+    values.clinicName.trim();
+
+  function appendSuggestedSpecialDays(days: ClientSpecialDaySuggestion[]): void {
+    setValues((v) => ({
+      ...v,
+      specialDays: mergeSpecialDaysIntoForm(v.specialDays, days),
+    }));
+  }
 
   function setBrandType(next: ClientFormValues["brandType"]): void {
     setValues((v) => {
@@ -470,11 +510,11 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
         <div>
           <p className="text-sm font-medium text-foreground">Monthly calendar cadence</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Total rows per month and how many use multi-slide Carousels. The generator uses these unless you set a
-            one-off override on the Generator page.
+            Single-image poster rows (0–30), plus up to 10 Carousel and 10 Animated rows (62 rows max combined per
+            month). The generator uses these unless you set a one-off override on the Generator page.
           </p>
         </div>
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-3">
           <div>
             <Label htmlFor="ppm">Posts per month</Label>
             <Input
@@ -482,34 +522,24 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
               type="number"
               inputMode="numeric"
               className="mt-1"
+              min={0}
+              max={MAX_POSTS_PER_MONTH}
               value={values.postsPerMonth}
               onChange={(e) => {
                 const raw = e.target.value;
                 if (raw === "") {
-                  setValues({ ...values, postsPerMonth: 15 });
+                  setValues({ ...values, ...applyCadenceToForm(values, 0) });
                   return;
                 }
                 const n = Number(raw);
                 if (!Number.isFinite(n)) return;
-                const posts = clampPostsPerMonthState(n);
-                setValues({
-                  ...values,
-                  postsPerMonth: posts,
-                  carouselsPerMonth: clampCarouselsState(values.carouselsPerMonth, posts),
-                });
+                setValues({ ...values, ...applyCadenceToForm(values, n) });
               }}
-              onBlur={() =>
-                setValues((v) => {
-                  const posts = clampPostsPerMonthState(v.postsPerMonth);
-                  return {
-                    ...v,
-                    postsPerMonth: posts,
-                    carouselsPerMonth: clampCarouselsState(v.carouselsPerMonth, posts),
-                  };
-                })
-              }
+              onBlur={() => setValues((v) => ({ ...v, ...applyCadenceToForm(v, v.postsPerMonth) }))}
             />
-            <p className="mt-1 text-xs text-muted-foreground">Total calendar rows (posters + carousels), 1–62.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Single-image Poster rows (0–{MAX_POSTS_PER_MONTH}).
+            </p>
           </div>
           <div>
             <Label htmlFor="cpm">Carousels for month</Label>
@@ -519,7 +549,7 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
               inputMode="numeric"
               className="mt-1"
               min={0}
-              max={values.postsPerMonth}
+              max={maxCarouselsForCadence(values.postsPerMonth, values.animatedPerMonth)}
               value={values.carouselsPerMonth}
               onChange={(e) => {
                 const raw = e.target.value;
@@ -531,18 +561,70 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
                 if (!Number.isFinite(n)) return;
                 setValues({
                   ...values,
-                  carouselsPerMonth: clampCarouselsState(n, values.postsPerMonth),
+                  carouselsPerMonth: clampCarouselsPerMonth(n, values.postsPerMonth, values.animatedPerMonth),
+                  animatedPerMonth: clampAnimatedPerMonth(
+                    values.animatedPerMonth,
+                    values.postsPerMonth,
+                    n
+                  ),
                 });
               }}
               onBlur={() =>
                 setValues((v) => ({
                   ...v,
-                  carouselsPerMonth: clampCarouselsState(v.carouselsPerMonth, v.postsPerMonth),
+                  carouselsPerMonth: clampCarouselsPerMonth(
+                    v.carouselsPerMonth,
+                    v.postsPerMonth,
+                    v.animatedPerMonth
+                  ),
                 }))
               }
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              Rows that use type Carousel (0–{values.postsPerMonth}). Remaining rows are single-image posters.
+              Rows that use type Carousel (0–{maxCarouselsForCadence(values.postsPerMonth, values.animatedPerMonth)}).
+            </p>
+          </div>
+          <div>
+            <Label htmlFor="apm">Animated for month</Label>
+            <Input
+              id="apm"
+              type="number"
+              inputMode="numeric"
+              className="mt-1"
+              min={0}
+              max={maxAnimatedForCadence(values.postsPerMonth, values.carouselsPerMonth)}
+              value={values.animatedPerMonth}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === "") {
+                  setValues({ ...values, animatedPerMonth: 0 });
+                  return;
+                }
+                const n = Number(raw);
+                if (!Number.isFinite(n)) return;
+                setValues({
+                  ...values,
+                  animatedPerMonth: clampAnimatedPerMonth(n, values.postsPerMonth, values.carouselsPerMonth),
+                  carouselsPerMonth: clampCarouselsPerMonth(
+                    values.carouselsPerMonth,
+                    values.postsPerMonth,
+                    n
+                  ),
+                });
+              }}
+              onBlur={() =>
+                setValues((v) => ({
+                  ...v,
+                  animatedPerMonth: clampAnimatedPerMonth(
+                    v.animatedPerMonth,
+                    v.postsPerMonth,
+                    v.carouselsPerMonth
+                  ),
+                }))
+              }
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Rows that use type Animated (0–{maxAnimatedForCadence(values.postsPerMonth, values.carouselsPerMonth)}).
             </p>
           </div>
         </div>
@@ -927,9 +1009,23 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
 
       <Separator />
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
+      <div className="space-y-3">
+        <div>
           <Label>Special days</Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Save awareness days, festivals, and campaigns on the client profile. They apply when you generate a calendar
+            for the same month and year.
+          </p>
+        </div>
+        <ClientSuggestedSpecialDaysPanel
+          specialties={values.specialty}
+          clinicName={clinicNameForSuggestions}
+          city={values.city}
+          disabled={submitting}
+          onAddDays={appendSuggestedSpecialDays}
+        />
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground">Saved special days</p>
           <Button
             type="button"
             size="sm"
@@ -941,7 +1037,7 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
               })
             }
           >
-            Add day
+            Add day manually
           </Button>
         </div>
         <div className="space-y-2">

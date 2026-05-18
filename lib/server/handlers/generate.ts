@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_ANIMATED_PER_MONTH, MAX_CAROUSELS_PER_MONTH } from "@/lib/constants/cadence";
 import { prisma } from "@/lib/server/prisma";
 import { HttpError } from "@/lib/server/http";
 import { addGenerateJobWithRetry } from "@/lib/server/queueEnqueue";
@@ -17,7 +18,8 @@ const singleSchema = z.object({
   month: z.number().int().min(1).max(12),
   year: z.number().int().min(2020).max(2100),
   postCountOverride: z.number().int().min(1).max(62).optional(),
-  carouselCountOverride: z.number().int().min(0).max(62).optional(),
+  carouselCountOverride: z.number().int().min(0).max(MAX_CAROUSELS_PER_MONTH).optional(),
+  animatedCountOverride: z.number().int().min(0).max(MAX_ANIMATED_PER_MONTH).optional(),
   extraSpecialDays: z.array(specialDayRunSchema).optional(),
 });
 
@@ -28,11 +30,13 @@ const bulkSchema = z.object({
 function optionalEnqueuePayload(body: {
   postCountOverride?: number;
   carouselCountOverride?: number;
+  animatedCountOverride?: number;
   extraSpecialDays?: z.infer<typeof specialDayRunSchema>[];
 }): Record<string, unknown> | undefined {
   if (
     body.postCountOverride === undefined &&
     body.carouselCountOverride === undefined &&
+    body.animatedCountOverride === undefined &&
     body.extraSpecialDays === undefined
   ) {
     return undefined;
@@ -40,6 +44,7 @@ function optionalEnqueuePayload(body: {
   return {
     ...(body.postCountOverride !== undefined ? { postCountOverride: body.postCountOverride } : {}),
     ...(body.carouselCountOverride !== undefined ? { carouselCountOverride: body.carouselCountOverride } : {}),
+    ...(body.animatedCountOverride !== undefined ? { animatedCountOverride: body.animatedCountOverride } : {}),
     ...(body.extraSpecialDays !== undefined ? { extraSpecialDays: body.extraSpecialDays } : {}),
   };
 }
@@ -81,6 +86,7 @@ export async function enqueueGenerate(userId: string, body: unknown) {
     userId,
     postCountOverride: parsed.postCountOverride,
     carouselCountOverride: parsed.carouselCountOverride,
+    animatedCountOverride: parsed.animatedCountOverride,
     extraSpecialDays: parsed.extraSpecialDays,
   };
 
@@ -156,6 +162,7 @@ export async function enqueueBulkGenerate(userId: string, body: unknown) {
       userId,
       postCountOverride: item.postCountOverride,
       carouselCountOverride: item.carouselCountOverride,
+      animatedCountOverride: item.animatedCountOverride,
       extraSpecialDays: item.extraSpecialDays,
     };
     try {
