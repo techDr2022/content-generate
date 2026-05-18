@@ -194,13 +194,17 @@ ${
 }
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SUPPORTING TEXT rules
+SUPPORTING TEXT rules (Instagram caption)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Write engaging, scroll-stopping captions: warm, educational, and slightly more elaborate than a bare minimum — explain the why, add one practical tip or "when to see a doctor" line, and a soft CTA woven into the prose (not only hashtags).
+- EMOJIS (main body only — never in the hashtag line): use 3–6 relevant, professional healthcare emojis per caption (e.g. ❤️ 🩺 💪 🏥 📅 ✨ 🌿 ⚠️). Place them naturally at the start of 1–2 sentences or after key phrases — not every sentence, not clustered as spam, never replace clinical meaning.
+- Do not use emojis inside supportingTextDefault or inside the hashtag block.
 
 ${
   compactCalendar
     ? `- REQUIRED ORDER inside each "supportingText" value (do not reorder):
-  1) Main body: 3 or 4 short sentences only (clinical, patient-friendly; mention doctor name, clinic, specialty, and city compactly). Do not exceed four sentences in the main body.
+  1) Main body: 4 or 5 short sentences (clinical, patient-friendly; mention doctor name, clinic, specialty, and city; include one elaborated detail — e.g. common sign, prevention tip, or who benefits). Use 2–4 emojis in the main body (high-volume month). Do not exceed five sentences in the main body.
   2) One blank line (inside the string as \\n\\n — see VALID JSON below).
   3) If client.supportingTextDefault is non-empty (see CLIENT PROFILE JSON): insert that text VERBATIM here — immediately BEFORE hashtags. Do not paraphrase or omit. If empty, skip this block entirely.
   4) One blank line.
@@ -208,7 +212,7 @@ ${
 - Never place hashtags before supportingTextDefault. Never place supportingTextDefault after hashtags.
 - "topic" field: one line, maximum 120 characters.`
     : `- REQUIRED ORDER inside each "supportingText" value (do not reorder):
-  1) Main body: minimum 5 sentences, maximum 8 short sentences; clinical depth, patient-friendly tone; naturally include doctor name, clinic name, specialty, topic keyword, city; at least 4 SEO keywords woven into prose (not as a naked list unless style demands). Brevity is mandatory: the entire JSON array for the month must stay well within the output token limit — never write long paragraphs.
+  1) Main body: minimum 6 sentences, maximum 10 short sentences; clinical depth with patient-friendly tone; naturally include doctor name, clinic name, specialty, topic keyword, and city; elaborate with context (what it is, why it matters, one actionable takeaway, when to seek care if relevant); at least 4 SEO keywords woven into prose (not as a naked list). Keep sentences punchy — no wall-of-text paragraphs, but do not be overly terse.
   2) One blank line (inside the string as \\n\\n — see VALID JSON below).
   3) If client.supportingTextDefault is non-empty (see CLIENT PROFILE JSON): insert that text VERBATIM here — immediately BEFORE hashtags. Do not paraphrase or omit. If empty, skip this block entirely.
   4) One blank line.
@@ -257,7 +261,7 @@ Value types (real JSON — not schema shorthand):
 - "specialDayLabel": JSON string or JSON null (literal null without quotes when null).
 
 Valid one-row example (structure only — use real client content for every row):
-[{"date":"05 June 2026","code":"SP1","department":"Cardiology","type":"Poster","style":"Short Statement","textInImage":"Heart health matters.\\n\\nBook an appointment\\nSunrise Clinic\\nAustin","supportingText":"Short educational body here.\\n\\n#drsmith #sunriseclinic #austin #hearthealth #cardiology #wellness #screening #prevention","isAIAdded":false,"specialDayLabel":null,"topic":"Routine cardiac screening"}]
+[{"date":"05 June 2026","code":"SP1","department":"Cardiology","type":"Poster","style":"Short Statement","textInImage":"Heart health matters.\\n\\nBook an appointment\\nSunrise Clinic\\nAustin","supportingText":"❤️ Your heart works hard every day — routine screening helps catch issues early. 🩺 Dr. Smith at Sunrise Clinic in Austin explains what a simple check-up can reveal about blood pressure, cholesterol, and overall cardiac wellness. 💪 Small daily habits (movement, balanced meals, stress care) support long-term heart health. 📅 If you have family history or new symptoms, book a visit — we're here to guide you with clear, compassionate care.\\n\\n#drsmith #sunriseclinic #austin #hearthealth #cardiology #wellness #screening #prevention","isAIAdded":false,"specialDayLabel":null,"topic":"Routine cardiac screening"}]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STYLE FORMAT TEMPLATES
