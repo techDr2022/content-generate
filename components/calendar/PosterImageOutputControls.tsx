@@ -60,7 +60,8 @@ export function PosterImageOutputControls({ value, onChange }: PosterImageOutput
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          GPT models accept auto / low / medium / high. DALL·E 3 maps low–medium–auto to standard and high to HD.
+          GPT models accept auto / low / medium / high. Use High only when you need sharper logo or doctor-photo
+          matching (slower). DALL·E 3 maps low–medium–auto to standard and high to HD.
         </p>
       </div>
 

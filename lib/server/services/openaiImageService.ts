@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import type OpenAI from "openai";
 import { toFile } from "openai/uploads";
 import { Buffer } from "node:buffer";
 import type {
@@ -18,6 +18,8 @@ import {
   estimateOpenAiImageCostUsd,
   type OpenAiImageOperation,
 } from "./openaiImagePricing";
+import { getOpenAiClient } from "./openaiClient";
+import { optimizeImageForOpenAiUpload } from "./posterReferenceImageOptimize";
 
 export type PosterImageUsage = {
   operation: OpenAiImageOperation;
@@ -191,15 +193,31 @@ function imageEditModel(): string {
   return "gpt-image-1.5";
 }
 
-function imageSizeFromEnv(): "1024x1024" | "1024x1792" | "1792x1024" {
+/** High input fidelity is slow; only use when the user explicitly asks for high quality. */
+function resolveInputFidelity(
+  model: string,
+  quality?: PosterImageQualityId
+): "high" | undefined {
+  if (quality !== "high") return undefined;
+  return supportsInputFidelityParameter(model) ? "high" : undefined;
+}
+
+const PRESET_POSTER_SIZES = ["1024x1024", "1024x1792", "1792x1024"] as const;
+type PresetPosterSize = (typeof PRESET_POSTER_SIZES)[number];
+
+function isCustomPixelSize(value: string): boolean {
+  return /^\d+x\d+$/.test(value);
+}
+
+function imageSizeFromEnv(): PresetPosterSize | string {
   const raw = process.env.OPENAI_IMAGE_SIZE?.trim().toLowerCase();
-  if (raw === "1024x1792" || raw === "1792x1024" || raw === "1024x1024") {
-    return raw;
-  }
+  if (!raw) return "1024x1024";
+  if (raw === "1024x1792" || raw === "1792x1024" || raw === "1024x1024") return raw;
+  if (isCustomPixelSize(raw)) return raw;
   return "1024x1024";
 }
 
-function resolveDalleStylePosterSize(requested?: PosterImageSizeId): "1024x1024" | "1024x1792" | "1792x1024" {
+function resolveDalleStylePosterSize(requested?: PosterImageSizeId): PresetPosterSize | string {
   if (requested === "1024x1792" || requested === "1792x1024" || requested === "1024x1024") {
     return requested;
   }
@@ -210,14 +228,17 @@ function isDalleImageModel(model: string): boolean {
   return /^dall-e-/i.test(model.trim());
 }
 
-function effectiveGenerateSize(
-  model: string,
-  dallESize: "1024x1024" | "1024x1792" | "1792x1024"
-): string {
+function effectiveGenerateSize(model: string, requested: PresetPosterSize | string): string {
   if (isDalleImageModel(model)) {
-    return dallESize;
+    if (requested === "1024x1792" || requested === "1792x1024" || requested === "1024x1024") {
+      return requested;
+    }
+    return "1024x1024";
   }
-  switch (dallESize) {
+  if (typeof requested === "string" && isCustomPixelSize(requested)) {
+    return requested;
+  }
+  switch (requested) {
     case "1024x1792":
       return "1024x1536";
     case "1792x1024":
@@ -335,15 +356,24 @@ function buildUsage(
   return { operation, model, size, quality, costUsd };
 }
 
+async function referenceImageFile(
+  base64: string,
+  mimeType: string,
+  label: string,
+  uploadName: string
+): Promise<Awaited<ReturnType<typeof toFile>>> {
+  const optimized = await optimizeImageForOpenAiUpload(base64, mimeType, label);
+  return toFile(
+    Buffer.from(optimized.base64, "base64"),
+    uploadFilenameForMime(optimized.mimeType, uploadName),
+    { type: optimized.mimeType }
+  );
+}
+
 export async function generatePosterImageFromText(
   input: PosterGenerateInput
 ): Promise<PosterImageResult> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
-  }
-
-  const client = new OpenAI({ apiKey });
+  const client = getOpenAiClient();
   const contact = input.contactDetails?.trim();
   const hasLogo = Boolean(input.logoBase64?.trim() && input.logoMimeType);
   const hasDoctor = Boolean(input.doctorPhotoBase64?.trim() && input.doctorPhotoMimeType);
@@ -457,30 +487,23 @@ async function generatePosterWithReferenceImages(
       : 100;
   const editQuality = mapGptQualityForEdit(input.imageQuality);
 
-  const files: Awaited<ReturnType<typeof toFile>>[] = [];
+  const filePromises: Promise<Awaited<ReturnType<typeof toFile>>>[] = [];
   if (hasLogo && input.logoBase64 && input.logoMimeType) {
-    files.push(
-      await toFile(Buffer.from(input.logoBase64, "base64"), uploadFilenameForMime(input.logoMimeType, "logo"), {
-        type: input.logoMimeType,
-      })
-    );
+    filePromises.push(referenceImageFile(input.logoBase64, input.logoMimeType, "logo", "logo"));
   }
   if (hasDoctor && input.doctorPhotoBase64 && input.doctorPhotoMimeType) {
-    files.push(
-      await toFile(
-        Buffer.from(input.doctorPhotoBase64, "base64"),
-        uploadFilenameForMime(input.doctorPhotoMimeType, "doctor"),
-        { type: input.doctorPhotoMimeType }
-      )
+    filePromises.push(
+      referenceImageFile(input.doctorPhotoBase64, input.doctorPhotoMimeType, "doctor", "doctor")
     );
   }
+  const files = await Promise.all(filePromises);
 
   if (files.length === 0) {
     throw new Error("Reference image upload was empty");
   }
 
   const prompt = buildEditPromptWithReferences(posterPrompt, hasLogo, hasDoctor);
-  const inputFidelity = supportsInputFidelityParameter(editModel) ? ("high" as const) : undefined;
+  const inputFidelity = resolveInputFidelity(editModel, input.imageQuality);
 
   logger.info("OpenAI image edit starting", {
     mode: "edit",
@@ -533,17 +556,12 @@ async function generatePosterWithReferenceImages(
 export async function refinePosterImage(
   input: PosterRefineInput
 ): Promise<PosterImageResult> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
-  }
-
   const instruction = input.editInstruction.trim();
   if (!instruction) {
     throw new Error("editInstruction is required");
   }
 
-  const client = new OpenAI({ apiKey });
+  const client = getOpenAiClient();
   const editModel = imageEditModel();
   const sizeRequested = resolveDalleStylePosterSize(input.imageSize);
   const size = effectiveGenerateSize(editModel, sizeRequested);
@@ -556,10 +574,11 @@ export async function refinePosterImage(
   const editQuality = mapGptQualityForEdit(input.imageQuality);
   const brandBlock = formatBrandKitForImagePrompt(input.brandKit);
 
-  const file = await toFile(
-    Buffer.from(input.imageBase64, "base64"),
-    uploadFilenameForMime(input.imageMimeType, "poster"),
-    { type: input.imageMimeType }
+  const file = await referenceImageFile(
+    input.imageBase64,
+    input.imageMimeType,
+    "poster-refine",
+    "poster"
   );
 
   let prompt = `Edit this healthcare marketing poster image.
@@ -576,7 +595,7 @@ Preserve all text that was not mentioned in the change request. Keep the poster 
     prompt = `${prompt.slice(0, MAX_EDIT_PROMPT_CHARS - 1)}…`;
   }
 
-  const inputFidelity = supportsInputFidelityParameter(editModel) ? ("high" as const) : undefined;
+  const inputFidelity = resolveInputFidelity(editModel, input.imageQuality);
 
   logger.info("OpenAI poster refine starting", {
     mode: "refine",

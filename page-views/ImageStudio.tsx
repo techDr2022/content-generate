@@ -44,7 +44,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { useGeneratePosterImage, useJobCalendarRows } from "@/hooks/useGenerator";
 import { useJobs } from "@/hooks/useJobs";
 import { parseCustomPosterTexts } from "@/lib/posterCustomText";
+import { runWithConcurrency } from "@/lib/runWithConcurrency";
 import { cn } from "@/lib/utils";
+
+/** Parallel poster API calls during bulk (same model; watch OpenAI rate limits). */
+const POSTER_BULK_CONCURRENCY = 2;
 
 type StudioMode = "calendar" | "custom";
 
@@ -232,15 +236,13 @@ export function ImageStudioPage() {
     setBulkTotal(items.length);
     setBulkDone(0);
 
-    const ok: BulkOk[] = [];
-    const bad: BulkFail[] = [];
-
     const kit = clientBrandKit;
     const useStyleRotation = Boolean(kit?.rotatePosterStyles);
     const useDoctorRotation = Boolean(kit?.rotateDoctors && clientDoctors.length > 1);
+    let completed = 0;
 
-    for (let step = 0; step < items.length; step++) {
-      const { rowIndex, text, label, fileSlug, contentStyle, look: rowLook } = items[step]!;
+    const outcomes = await runWithConcurrency(items, POSTER_BULK_CONCURRENCY, async (item, step) => {
+      const { rowIndex, text, label, fileSlug, contentStyle, look: rowLook } = item;
 
       let effectiveLook: PosterLookId;
       let effectiveCustom: string | undefined;
@@ -277,24 +279,33 @@ export function ImageStudioPage() {
             : {}),
         });
         const safeSlug = fileSlug.replace(/[^\w\-]+/g, "_");
-        ok.push({
-          rowIndex,
-          date: label,
-          src: `data:${data.mimeType};base64,${data.imageBase64}`,
-          mimeType: data.mimeType,
-          fileName: `poster-${safeSlug}.${extFromMime(data.mimeType)}`,
-        });
+        return {
+          ok: true as const,
+          value: {
+            rowIndex,
+            date: label,
+            src: `data:${data.mimeType};base64,${data.imageBase64}`,
+            mimeType: data.mimeType,
+            fileName: `poster-${safeSlug}.${extFromMime(data.mimeType)}`,
+          },
+        };
       } catch (e) {
-        bad.push({
-          rowIndex,
-          date: label,
-          message: e instanceof Error ? e.message : String(e),
-        });
+        return {
+          ok: false as const,
+          value: {
+            rowIndex,
+            date: label,
+            message: e instanceof Error ? e.message : String(e),
+          },
+        };
+      } finally {
+        completed += 1;
+        setBulkDone(completed);
       }
+    });
 
-      setBulkDone(step + 1);
-      await new Promise((r) => setTimeout(r, 350));
-    }
+    const ok = outcomes.filter((o) => o.ok).map((o) => o.value);
+    const bad = outcomes.filter((o) => !o.ok).map((o) => o.value);
 
     setResults(ok);
     setFailures(bad);

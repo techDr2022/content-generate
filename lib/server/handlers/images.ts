@@ -120,13 +120,15 @@ export async function generateImageFromCalendarText(body: unknown, userId?: stri
         : {}),
       ...brandFields,
     });
-    await recordOpenAiImageUsage({
+    void recordOpenAiImageUsage({
       userId,
       operation: out.usage.operation,
       model: out.usage.model,
       size: out.usage.size,
       quality: out.usage.quality,
       costUsd: out.usage.costUsd,
+    }).catch(() => {
+      /* usage logging must not block the image response */
     });
     return {
       success: true as const,
@@ -177,13 +179,15 @@ export async function refineImageFromPoster(body: unknown, userId?: string) {
       background: parsed.data.background,
       ...(parsed.data.brandKit ? { brandKit: parsed.data.brandKit } : {}),
     });
-    await recordOpenAiImageUsage({
+    void recordOpenAiImageUsage({
       userId,
       operation: out.usage.operation,
       model: out.usage.model,
       size: out.usage.size,
       quality: out.usage.quality,
       costUsd: out.usage.costUsd,
+    }).catch(() => {
+      /* usage logging must not block the image response */
     });
     return {
       success: true as const,
