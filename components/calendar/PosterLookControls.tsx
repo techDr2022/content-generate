@@ -1,5 +1,6 @@
 import type { PosterLookId } from "@/lib/types";
 import { POSTER_LOOK_IDS, POSTER_LOOK_LABELS } from "@/lib/types";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,6 +10,10 @@ interface PosterLookControlsProps {
   onPosterLookChange: (value: PosterLookId) => void;
   posterLookCustom: string;
   onPosterLookCustomChange: (value: string) => void;
+  onApplyToAllRows?: () => void;
+  rowCount?: number;
+  /** Shown under the look selector (e.g. calendar Select rows vs job preview). */
+  hint?: string;
 }
 
 export function PosterLookControls({
@@ -16,6 +21,9 @@ export function PosterLookControls({
   onPosterLookChange,
   posterLookCustom,
   onPosterLookCustomChange,
+  onApplyToAllRows,
+  rowCount = 0,
+  hint,
 }: PosterLookControlsProps) {
   return (
     <div className="space-y-3">
@@ -33,11 +41,24 @@ export function PosterLookControls({
             ))}
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">
-          Every poster uses a short <span className="font-medium text-foreground">professional healthcare</span> safety
-          baseline, then each row&apos;s <span className="font-medium text-foreground">Text in image</span> copy. This menu
-          adds optional layout/style direction (or only the baseline + your text).
-        </p>
+        {hint !== undefined ? (
+          <p className="text-xs text-muted-foreground">{hint}</p>
+        ) : onApplyToAllRows ? (
+          <p className="text-xs text-muted-foreground">
+            Default look for new rows. Set each row&apos;s look in the table or poster list below, then use{" "}
+            <span className="font-medium text-foreground">Generate selected</span>.
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Applies to all selected rows when you use{" "}
+            <span className="font-medium text-foreground">Generate selected</span>.
+          </p>
+        )}
+        {onApplyToAllRows && rowCount > 0 ? (
+          <Button type="button" variant="outline" size="sm" className="mt-2" onClick={onApplyToAllRows}>
+            Apply this look to all {rowCount} rows
+          </Button>
+        ) : null}
       </div>
       {posterLook === "custom" ? (
         <div className="space-y-2">

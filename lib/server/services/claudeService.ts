@@ -214,3 +214,26 @@ export async function generateCalendarWithClaude(
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
+
+/** Single Claude call returning parsed JSON (object or array). */
+export async function requestClaudeJson(system: string, user: string, maxTokens: number): Promise<unknown> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY is not configured");
+  }
+
+  const client = new Anthropic({ apiKey, timeout: anthropicHttpTimeoutMs(), maxRetries: 0 });
+  const response = await client.messages.create({
+    model: claudeModel(),
+    max_tokens: Math.min(Math.max(maxTokens, 256), 16_000),
+    system,
+    messages: [{ role: "user", content: user }],
+  });
+
+  const textBlock = response.content.find((b) => b.type === "text");
+  if (!textBlock || textBlock.type !== "text") {
+    throw new Error("No text content in Claude response");
+  }
+
+  return parseJsonArrayFromClaudeText(textBlock.text);
+}

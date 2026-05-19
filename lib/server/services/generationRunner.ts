@@ -6,9 +6,18 @@ import type { CalendarPost, GenerateJobPayload } from "@/lib/types";
 import type { SpecialDayInput } from "@/lib/types";
 import { prisma } from "../prisma";
 import { buildPrompt } from "./promptEngine";
+import { parseDoctorNames } from "@/lib/doctors";
+import { parseClientBrandKit } from "@/lib/types/brandKit";
+import type { BrandType } from "@/lib/types";
 import { generateCalendarWithClaude } from "./claudeService";
+import {
+  isCalendarContentReviewEnabled,
+  reviewAndRefineCalendarPosts,
+} from "./calendarContentReview";
+import { enforceCalendarTypeCounts } from "./calendarTypeCounts";
 import { buildExcel } from "./excelBuilder";
 import { persistWorkbookForJob } from "./storageService";
+import { syncCalendarPostsFromJob } from "./reviewCalendarSync";
 import { fetchTopicHistoryLastSixMonths } from "./topicTracker";
 import { emitJobProgress } from "./sseHub";
 import { logger } from "../logger";
@@ -308,7 +317,10 @@ export async function executeGenerationJob(
       carouselCountForRun: carouselForRun,
       animatedCountForRun: animatedForRun,
       notes: client.notes,
+      generationNotes: client.generationNotes ?? null,
       supportingTextDefault: client.supportingTextDefault ?? null,
+      brandKit: parseClientBrandKit(client.brandKit),
+      doctors: parseDoctorNames(client.doctorName, client.brandType as BrandType),
     };
 
     const { system, user } = buildPrompt(profile, month, year, mergedSpecials, topicHistory);
@@ -389,6 +401,53 @@ export async function executeGenerationJob(
       throw zErr;
     }
 
+    const carouselTarget =
+      typeof carouselForRun === "number" ? carouselForRun : posts.filter((p) => p.type === "Carousel").length;
+    const animatedTarget =
+      typeof animatedForRun === "number" ? animatedForRun : posts.filter((p) => p.type === "Animated").length;
+    const posterTarget = Math.max(0, effectivePosts - carouselTarget - animatedTarget);
+
+    if (typeof carouselForRun === "number" || typeof animatedForRun === "number") {
+      posts = enforceCalendarTypeCounts(posts, {
+        poster: posterTarget,
+        carousel: carouselTarget,
+        animated: animatedTarget,
+      });
+    }
+
+    if (isCalendarContentReviewEnabled()) {
+      await throwIfCancelled(jobId);
+      emitJobProgress(userId, {
+        jobId,
+        status: "processing",
+        clientName: client.name,
+        progress: 58,
+        month,
+        year,
+        phase: "Reviewing and refining each calendar cell…",
+        elapsedMs: Date.now() - runStarted,
+      });
+      await progress.updateProgress({ step: "content_review", pct: 58 });
+
+      try {
+        const reviewed = await reviewAndRefineCalendarPosts(posts, profile, topicHistory);
+        const normalizedReview = normalizeClaudeCalendarPostsForValidation(reviewed as unknown[]);
+        posts = z.array(calendarPostSchema).parse(normalizedReview);
+        if (typeof carouselForRun === "number" || typeof animatedForRun === "number") {
+          posts = enforceCalendarTypeCounts(posts, {
+            poster: posterTarget,
+            carousel: carouselTarget,
+            animated: animatedTarget,
+          });
+        }
+      } catch (reviewErr) {
+        logger.warn("Calendar content review failed; using pre-review output", {
+          jobId,
+          err: reviewErr instanceof Error ? reviewErr.message : String(reviewErr),
+        });
+      }
+    }
+
     const expected = effectivePosts;
     if (Math.abs(posts.length - expected) > 2) {
       logger.warn("Calendar post count outside target window (±2)", {
@@ -434,6 +493,15 @@ export async function executeGenerationJob(
       where: { id: jobId },
       data: { status: "done", fileUrl, errorMsg: null, posterCount },
     });
+
+    try {
+      await syncCalendarPostsFromJob(jobId);
+    } catch (syncErr) {
+      logger.warn("Calendar DB sync after generation failed (review portal may need manual sync)", {
+        jobId,
+        err: syncErr instanceof Error ? syncErr.message : String(syncErr),
+      });
+    }
 
     await progress.updateProgress({ step: "upload_complete", pct: 100 });
 

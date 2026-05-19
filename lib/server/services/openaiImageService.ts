@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { toFile } from "openai/uploads";
 import { Buffer } from "node:buffer";
 import type {
+  ClientBrandKit,
   PosterBrandAssetsPayload,
   PosterImageFormatId,
   PosterImageQualityId,
@@ -10,7 +11,28 @@ import type {
   PosterLookId,
 } from "@/lib/types";
 import { POSTER_LOOK_HINTS } from "@/lib/types";
+import { buildPosterLayoutForPrompt } from "@/lib/posterLayout";
+import { formatBrandKitForImagePrompt } from "./brandKitPrompt";
 import { logger } from "../logger";
+import {
+  estimateOpenAiImageCostUsd,
+  type OpenAiImageOperation,
+} from "./openaiImagePricing";
+
+export type PosterImageUsage = {
+  operation: OpenAiImageOperation;
+  model: string;
+  size: string;
+  quality: string;
+  costUsd: number;
+};
+
+export type PosterImageResult = {
+  b64: string;
+  mimeType: string;
+  revisedPrompt?: string;
+  usage: PosterImageUsage;
+};
 
 /** DALL·E 3 prompt max length */
 const MAX_PROMPT_CHARS = 4000;
@@ -36,18 +58,57 @@ export function buildPosterImagePrompt(input: {
   posterLook: PosterLookId;
   posterLookCustom?: string;
   contactDetails?: string;
+  brandKit?: ClientBrandKit | null;
+  /** Calendar content style (e.g. Myth vs Fact) — hints layout variety. */
+  contentStyle?: string;
+  /** Resolved header block (doctor / clinic line). */
+  headerBlock?: string;
+  /** Resolved footer block (contact, address). */
+  footerBlock?: string;
+  /** Featured doctor for this poster (portrait / header attribution). */
+  featuredDoctor?: string;
+  generationNotes?: string;
 }): string {
   const hint = resolveLookHint(input.posterLook, input.posterLookCustom);
+  const brandBlock = formatBrandKitForImagePrompt(input.brandKit);
+  const genNotes = input.generationNotes?.trim();
   const body = input.textInImage.trim();
   const contact = input.contactDetails?.trim();
+  const styleHint = input.contentStyle?.trim();
   const sep = "\n\n";
 
   const segments: string[] = [HEALTHCARE_POSTER_BASELINE];
+  if (brandBlock) segments.push(brandBlock);
+  if (genNotes) {
+    segments.push(`CLIENT GENERATION NOTES (follow for this poster):\n${genNotes}`);
+  }
   if (hint) segments.push(hint);
-  segments.push(body);
-  if (contact) {
+  if (styleHint) {
     segments.push(
-      `Contact and footer details to include as clear, readable typography (preserve wording; arrange for hierarchy and readability):\n${contact}`
+      `Content format: "${styleHint}" — choose a layout that fits this format (e.g. split panels for Myth vs Fact, checklist for Dos & Don'ts).`
+    );
+  }
+
+  const header = input.headerBlock?.trim();
+  const footer = input.footerBlock?.trim() ?? contact;
+  const doctor = input.featuredDoctor?.trim();
+
+  if (header || doctor) {
+    const headerLines = [
+      "POSTER HEADER (top area — clear hierarchy, readable typography):",
+      ...(header ? [header] : []),
+      ...(doctor && !header?.includes(doctor)
+        ? [`Feature this doctor prominently in the header or portrait area: ${doctor}`]
+        : []),
+    ];
+    segments.push(headerLines.join("\n"));
+  }
+
+  segments.push(`MAIN CONTENT (center — render this text faithfully):\n${body}`);
+
+  if (footer) {
+    segments.push(
+      `POSTER FOOTER (bottom — consistent on every creative; preserve wording):\n${footer}`
     );
   }
 
@@ -59,7 +120,8 @@ export function buildPosterImagePrompt(input: {
 
   let hintPart = hint;
   let bodyPart = body;
-  let contactPart = contact ?? "";
+  let contactPart = footer ?? "";
+  const headerPart = header ?? "";
 
   if (hintPart) {
     while (
@@ -86,7 +148,8 @@ export function buildPosterImagePrompt(input: {
     baselineLen +
     sepLen +
     (hintPart ? hintPart.length + sepLen : 0) +
-    (contactPart ? contactPart.length + sepLen : 0);
+    (headerPart ? headerPart.length + sepLen + 40 : 0) +
+    (contactPart ? contactPart.length + sepLen + 40 : 0);
   let bodyBudget = MAX_PROMPT_CHARS - overhead;
   if (bodyBudget < 40) bodyBudget = 40;
 
@@ -239,12 +302,42 @@ export type PosterGenerateInput = {
   textInImage: string;
   posterLook: PosterLookId;
   posterLookCustom?: string;
+  brandKit?: ClientBrandKit | null;
+  contentStyle?: string;
+  featuredDoctor?: string;
+  clinicName?: string;
+  city?: string;
+  generationNotes?: string;
 } & PosterImageOutputOptions &
   PosterBrandAssetsPayload;
 
+export type PosterRefineInput = {
+  imageBase64: string;
+  imageMimeType: string;
+  editInstruction: string;
+  brandKit?: ClientBrandKit | null;
+} & PosterImageOutputOptions;
+
+function buildUsage(
+  operation: OpenAiImageOperation,
+  model: string,
+  size: string,
+  quality: string,
+  input: { imageQuality?: PosterImageQualityId; referenceImageCount?: number }
+): PosterImageUsage {
+  const costUsd = estimateOpenAiImageCostUsd({
+    model,
+    operation,
+    size,
+    quality: input.imageQuality,
+    referenceImageCount: input.referenceImageCount,
+  });
+  return { operation, model, size, quality, costUsd };
+}
+
 export async function generatePosterImageFromText(
   input: PosterGenerateInput
-): Promise<{ b64: string; mimeType: string; revisedPrompt?: string }> {
+): Promise<PosterImageResult> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
@@ -256,11 +349,27 @@ export async function generatePosterImageFromText(
   const hasDoctor = Boolean(input.doctorPhotoBase64?.trim() && input.doctorPhotoMimeType);
   const hasRefs = hasLogo || hasDoctor;
 
+  const layoutCtx = {
+    doctorName: input.featuredDoctor?.trim() ?? "",
+    clinicName: input.clinicName?.trim() ?? "",
+    city: input.city?.trim() ?? "",
+  };
+  const layout = buildPosterLayoutForPrompt({
+    brandKit: input.brandKit,
+    ctx: layoutCtx,
+    extraContactDetails: contact,
+  });
+
   const posterPrompt = buildPosterImagePrompt({
     textInImage: input.textInImage,
     posterLook: input.posterLook,
     posterLookCustom: input.posterLookCustom,
-    contactDetails: contact,
+    brandKit: input.brandKit,
+    contentStyle: input.contentStyle,
+    headerBlock: layout.headerBlock,
+    footerBlock: layout.footerBlock,
+    featuredDoctor: input.featuredDoctor,
+    generationNotes: input.generationNotes,
   });
 
   if (hasRefs) {
@@ -321,10 +430,12 @@ export async function generatePosterImageFromText(
 
   const mimeFallback: PosterImageFormatId | "png" = dalle ? "png" : outputFormat;
 
+  const qualityStr = String(quality);
   return {
     b64,
     mimeType: mimeFromOutputFormat(response, mimeFallback),
     revisedPrompt: typeof item.revised_prompt === "string" ? item.revised_prompt : undefined,
+    usage: buildUsage("generate", model, size, qualityStr, input),
   };
 }
 
@@ -333,7 +444,7 @@ async function generatePosterWithReferenceImages(
   input: PosterGenerateInput,
   posterPrompt: string,
   flags: { hasLogo: boolean; hasDoctor: boolean }
-): Promise<{ b64: string; mimeType: string; revisedPrompt?: string }> {
+): Promise<PosterImageResult> {
   const { hasLogo, hasDoctor } = flags;
   const editModel = imageEditModel();
   const sizeRequested = resolveDalleStylePosterSize(input.imageSize);
@@ -404,9 +515,100 @@ async function generatePosterWithReferenceImages(
     throw new Error("OpenAI returned no image data");
   }
 
+  const refCount = (hasLogo ? 1 : 0) + (hasDoctor ? 1 : 0);
   return {
     b64,
     mimeType: mimeFromOutputFormat(response, outputFormat),
     revisedPrompt: typeof item.revised_prompt === "string" ? item.revised_prompt : undefined,
+    usage: buildUsage("edit", editModel, size, editQuality, {
+      ...input,
+      referenceImageCount: refCount,
+    }),
+  };
+}
+
+/**
+ * Edit an existing poster: remove or replace elements per user instruction (OpenAI image edit).
+ */
+export async function refinePosterImage(
+  input: PosterRefineInput
+): Promise<PosterImageResult> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+
+  const instruction = input.editInstruction.trim();
+  if (!instruction) {
+    throw new Error("editInstruction is required");
+  }
+
+  const client = new OpenAI({ apiKey });
+  const editModel = imageEditModel();
+  const sizeRequested = resolveDalleStylePosterSize(input.imageSize);
+  const size = effectiveGenerateSize(editModel, sizeRequested);
+  const outputFormat = input.outputFormat ?? "png";
+  const background = input.background ?? "auto";
+  const compression =
+    typeof input.outputCompression === "number" && !Number.isNaN(input.outputCompression)
+      ? Math.min(100, Math.max(0, Math.round(input.outputCompression)))
+      : 100;
+  const editQuality = mapGptQualityForEdit(input.imageQuality);
+  const brandBlock = formatBrandKitForImagePrompt(input.brandKit);
+
+  const file = await toFile(
+    Buffer.from(input.imageBase64, "base64"),
+    uploadFilenameForMime(input.imageMimeType, "poster"),
+    { type: input.imageMimeType }
+  );
+
+  let prompt = `Edit this healthcare marketing poster image.
+
+User change request (apply precisely): ${instruction}
+
+Preserve all text that was not mentioned in the change request. Keep the poster professional and on-brand for a medical practice.`;
+
+  if (brandBlock) {
+    prompt += `\n\n${brandBlock}`;
+  }
+
+  if (prompt.length > MAX_EDIT_PROMPT_CHARS) {
+    prompt = `${prompt.slice(0, MAX_EDIT_PROMPT_CHARS - 1)}…`;
+  }
+
+  const inputFidelity = supportsInputFidelityParameter(editModel) ? ("high" as const) : undefined;
+
+  logger.info("OpenAI poster refine starting", {
+    mode: "refine",
+    model: editModel,
+    promptChars: prompt.length,
+    editQuality,
+    outputFormat,
+  });
+
+  const response = await client.images.edit({
+    model: editModel,
+    image: file,
+    prompt,
+    n: 1,
+    size: size as "1024x1024" | "1024x1536" | "1536x1024",
+    quality: editQuality,
+    output_format: outputFormat,
+    background,
+    ...(outputFormat === "jpeg" || outputFormat === "webp" ? { output_compression: compression } : {}),
+    ...(inputFidelity ? { input_fidelity: inputFidelity } : {}),
+  });
+
+  const item = response.data?.[0];
+  const b64 = item?.b64_json;
+  if (!b64) {
+    throw new Error("OpenAI returned no image data");
+  }
+
+  return {
+    b64,
+    mimeType: mimeFromOutputFormat(response, outputFormat),
+    revisedPrompt: typeof item.revised_prompt === "string" ? item.revised_prompt : undefined,
+    usage: buildUsage("refine", editModel, size, editQuality, input),
   };
 }

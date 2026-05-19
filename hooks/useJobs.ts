@@ -5,6 +5,7 @@ import type { GenerationJobDTO } from "@/lib/types";
 export function useJobs() {
   return useQuery({
     queryKey: ["jobs"],
+    staleTime: 30_000,
     queryFn: async () => {
       const res = await api.get<ApiResponse<GenerationJobDTO[]>>("/api/jobs");
       return res.data.data ?? [];

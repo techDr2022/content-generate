@@ -16,6 +16,23 @@ model User {
   clients      Client[]
   jobs         GenerationJob[]
   reviewSessionsCreated ClientReviewSession[]
+  openAiUsageLogs OpenAiUsageLog[]
+}
+
+/** Estimated OpenAI poster image spend (for dashboard when billing API is unavailable). */
+model OpenAiUsageLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  operation String
+  model     String
+  size      String?
+  quality   String?
+  costUsd   Float
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
 }
 
 model Client {
@@ -35,8 +52,12 @@ model Client {
   /** Animated (motion) rows per month (0–10), stacked on posters and carousels (combined ≤ 62). */
   animatedPerMonth Int @default(0)
   notes         String?
+  /** Instructions for AI when generating calendar copy and posters (not internal team notes). */
+  generationNotes String?
   /** Inserted before hashtags in every generated supportingText (set at client create/edit). */
   supportingTextDefault String?
+  /** Colors, typography, grid, poster looks, and design guidelines (JSON). */
+  brandKit      Json?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
   userId        String

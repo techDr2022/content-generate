@@ -15,6 +15,8 @@ const CLIENT_MAX_READ = 6 * 1024 * 1024;
 interface PosterBrandAssetsControlsProps {
   value: PosterBrandAssetsState;
   onChange: (patch: Partial<PosterBrandAssetsState>) => void;
+  /** When set, client has a saved footer template; this field adds extra lines only. */
+  hasSavedFooter?: boolean;
 }
 
 function readImageFile(file: File): Promise<{ base64: string; mimeType: string }> {
@@ -44,7 +46,11 @@ function readImageFile(file: File): Promise<{ base64: string; mimeType: string }
   });
 }
 
-export function PosterBrandAssetsControls({ value, onChange }: PosterBrandAssetsControlsProps) {
+export function PosterBrandAssetsControls({
+  value,
+  onChange,
+  hasSavedFooter,
+}: PosterBrandAssetsControlsProps) {
   const logoPreview = value.logoBase64 && value.logoMimeType ? `data:${value.logoMimeType};base64,${value.logoBase64}` : null;
   const doctorPreview =
     value.doctorPhotoBase64 && value.doctorPhotoMimeType
@@ -84,11 +90,17 @@ export function PosterBrandAssetsControls({ value, onChange }: PosterBrandAssets
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="poster-contact-details">Contact details (on poster)</Label>
+        <Label htmlFor="poster-contact-details">
+          {hasSavedFooter ? "Extra footer lines (optional)" : "Contact details (on poster)"}
+        </Label>
         <Textarea
           id="poster-contact-details"
           rows={4}
-          placeholder="e.g. Dr Name · +91 … · clinic@email.com · Address · www…"
+          placeholder={
+            hasSavedFooter
+              ? "Added below the client’s saved footer template…"
+              : "e.g. Dr Name · +91 … · clinic@email.com · Address · www…"
+          }
           value={value.contactDetails}
           maxLength={POSTER_CONTACT_DETAILS_MAX_CHARS}
           onChange={(e) => onChange({ contactDetails: e.target.value })}

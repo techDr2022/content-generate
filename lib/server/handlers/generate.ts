@@ -59,10 +59,18 @@ export async function enqueueGenerate(userId: string, body: unknown) {
     throw new HttpError(404, "Client not found");
   }
 
+  const clientCarousels =
+    typeof client.carouselsPerMonth === "number" && client.carouselsPerMonth > 0
+      ? client.carouselsPerMonth
+      : 0;
+  const clientAnimated =
+    typeof client.animatedPerMonth === "number" && client.animatedPerMonth > 0
+      ? client.animatedPerMonth
+      : 0;
   const postCount =
     typeof parsed.postCountOverride === "number" && parsed.postCountOverride > 0
       ? parsed.postCountOverride
-      : client.postsPerMonth;
+      : client.postsPerMonth + clientCarousels + clientAnimated;
 
   const storedPayload = optionalEnqueuePayload(parsed);
 
@@ -136,10 +144,18 @@ export async function enqueueBulkGenerate(userId: string, body: unknown) {
     if (!client) {
       throw new HttpError(404, `Client not found: ${item.clientId}`);
     }
+    const clientCarousels =
+      typeof client.carouselsPerMonth === "number" && client.carouselsPerMonth > 0
+        ? client.carouselsPerMonth
+        : 0;
+    const clientAnimated =
+      typeof client.animatedPerMonth === "number" && client.animatedPerMonth > 0
+        ? client.animatedPerMonth
+        : 0;
     const postCount =
       typeof item.postCountOverride === "number" && item.postCountOverride > 0
         ? item.postCountOverride
-        : client.postsPerMonth;
+        : client.postsPerMonth + clientCarousels + clientAnimated;
 
     const storedPayload = optionalEnqueuePayload(item);
 

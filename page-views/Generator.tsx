@@ -7,7 +7,7 @@ import type { RunSpecialDay } from "@/components/generator/SpecialDaysInput";
 import { ExportButton } from "@/components/export/ExportButton";
 import { DownloadCard } from "@/components/export/DownloadCard";
 import { CalendarPreview } from "@/components/calendar/CalendarPreview";
-import { Progress } from "@/components/ui/progress";
+import { GenerationProgressSection } from "@/components/generator/GenerationProgressSection";
 import { Button } from "@/components/ui/button";
 import { useClients } from "@/hooks/useClients";
 import { useCancelJob, useEnqueueGenerate, useJob, useJobPreview, useSuggestSpecialDays } from "@/hooks/useGenerator";
@@ -15,8 +15,6 @@ import type { GeneratePayload } from "@/hooks/useGenerator";
 import { useEnqueueBulkGenerate } from "@/hooks/useBulkExport";
 import { useJobProgress } from "@/hooks/useJobProgress";
 import { MAX_POSTS_PER_MONTH } from "@/lib/constants/cadence";
-import { formatDuration } from "@/lib/formatDuration";
-import { cn } from "@/lib/utils";
 import type { CalendarPost } from "@/lib/types";
 import {
   fingerprintSpecialties,
@@ -94,7 +92,6 @@ export function GeneratorPage() {
   const [progress, setProgress] = useState(0);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [completedIds, setCompletedIds] = useState(() => new Set<string>());
-  const [, setTick] = useState(0);
   const [lastDone, setLastDone] = useState<{
     jobId: string;
     clientName: string;
@@ -233,12 +230,6 @@ export function GeneratorPage() {
   }, [postOverride, carouselOverride, animatedOverride]);
 
   useEffect(() => {
-    if (!batchActive) return undefined;
-    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(id);
-  }, [batchActive]);
-
-  useEffect(() => {
     if (!lastEvent || !sessionJobs.includes(lastEvent.jobId)) return;
     setProgress(lastEvent.progress);
     if (lastEvent.status === "done" || lastEvent.status === "failed" || lastEvent.status === "cancelled") {
@@ -279,7 +270,6 @@ export function GeneratorPage() {
     }
   }, [activeJobPoll.data, activeJobId, sessionJobs, selectedClient?.name]);
 
-  const wallElapsedMs = runStartedAt ? Date.now() - runStartedAt : 0;
   const sessionEvent =
     lastEvent && sessionJobs.includes(lastEvent.jobId) ? lastEvent : null;
   const pollStatus = activeJobPoll.data?.status;
@@ -320,18 +310,6 @@ export function GeneratorPage() {
           : null
       : null;
 
-  /**
-   * True when the job row is still `pending` in the DB long after enqueue — meaning no worker
-   * consumed the BullMQ job. We poll `/api/jobs/:id` so we do NOT rely on SSE (which can lag),
-   * avoiding false "waiting on worker" while `npm run dev:all` is healthy.
-   */
-  const stuckPendingNoWorker =
-    Boolean(activeJobId) &&
-    batchActive &&
-    wallElapsedMs >= 22_000 &&
-    !activeJobPoll.isLoading &&
-    !activeJobPoll.isError &&
-    activeJobPoll.data?.status === "pending";
   const barPercent =
     sessionJobs.length <= 1
       ? Math.min(100, effectiveLiveProgress)
@@ -465,7 +443,6 @@ export function GeneratorPage() {
     setLastDone(null);
     setCompletedIds(new Set());
     setRunStartedAt(null);
-    setTick(0);
     const clientDefault = Math.min(
       62,
       (selectedClient?.postsPerMonth ?? 15) +
@@ -617,27 +594,6 @@ export function GeneratorPage() {
         </span>
       </div>
 
-      {stuckPendingNoWorker ? (
-        <div
-          className="rounded-md border border-amber-500/50 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-400/40 dark:bg-amber-950/40 dark:text-amber-50"
-          role="status"
-        >
-          <p className="font-medium">Generation is waiting on the worker</p>
-          <p className="mt-1 text-xs leading-relaxed opacity-95">
-            This screen only <em>queues</em> jobs. Run the BullMQ worker so Redis jobs execute: from the project root, in a{" "}
-            <strong>second terminal</strong> run <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run worker</code>{" "}
-            (same <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">.env</code> /{" "}
-            <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">.env.local</code> as <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run dev</code>
-            ), or use <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run dev:all</code> to start Next and the worker together. Ensure{" "}
-            <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">REDIS_URL</code> is set.{" "}
-            <span className="block pt-1">
-              In production, the host must also run the worker (same <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">REDIS_URL</code>): e.g.{" "}
-              <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run start:web-and-worker</code> on Railway, or a second service with{" "}
-              <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">npm run worker</code> if the web app runs elsewhere (Vercel cannot keep a worker alive).
-            </span>
-          </p>
-        </div>
-      ) : null}
 
       {sessionJobs.length > 1 ? (
         <p className="text-xs text-muted-foreground">
@@ -659,51 +615,21 @@ export function GeneratorPage() {
         </p>
       ) : null}
 
-      <div
-        className="space-y-2 rounded-lg border bg-muted/30 p-4"
-        role="status"
-        aria-live="polite"
-        aria-label="Generation progress"
-      >
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-semibold tabular-nums tracking-tight">{Math.round(barPercent)}%</span>
-            <span className="text-sm text-muted-foreground">complete</span>
-          </div>
-          <div className="text-right text-sm tabular-nums text-muted-foreground">
-            <div>
-              <span className="font-medium text-foreground">Elapsed</span> {formatDuration(wallElapsedMs)}
-            </div>
-            {sessionEvent?.elapsedMs != null && sessionEvent.elapsedMs > 0 ? (
-              <div className="text-xs">
-                Worker step time {formatDuration(sessionEvent.elapsedMs)}
-              </div>
-            ) : null}
-          </div>
-        </div>
-        {sessionEvent?.phase ? (
-          <p className="text-sm leading-snug text-foreground">{sessionEvent.phase}</p>
-        ) : batchActive ? (
-          <div className="space-y-1">
-            {streamError ? (
-              <p className="text-sm leading-snug text-amber-800 dark:text-amber-100">{streamError}</p>
-            ) : null}
-            <p className="text-sm text-muted-foreground">
-              {pollPhaseHint ??
-                (activeJobPoll.isLoading ? "Fetching job status…" : "Connecting to progress stream…")}
-            </p>
-          </div>
-        ) : null}
-        {inClaudePhase ? (
-          <p className="text-xs text-amber-800 dark:text-amber-200/90">
-            Claude is generating many posts; this step often takes 1–3 minutes. The timer above keeps moving while you wait.
-          </p>
-        ) : null}
-        <Progress
-          value={barPercent}
-          className={cn("h-2.5", inClaudePhase && "[&>div]:animate-pulse")}
-        />
-      </div>
+      <GenerationProgressSection
+        barPercent={barPercent}
+        batchActive={batchActive}
+        runStartedAt={runStartedAt}
+        sessionEvent={sessionEvent}
+        streamError={streamError}
+        pollPhaseHint={pollPhaseHint}
+        activeJobPollLoading={activeJobPoll.isLoading}
+        inClaudePhase={Boolean(inClaudePhase)}
+        activeJobId={activeJobId}
+        activeJobPollStatus={activeJobPoll.data?.status}
+        activeJobPollIsLoading={activeJobPoll.isLoading}
+        activeJobPollIsError={activeJobPoll.isError}
+      />
+
 
       {(lastEvent && sessionJobs.includes(lastEvent.jobId) && lastEvent.status === "failed") ||
       (activeJobId &&
@@ -731,7 +657,7 @@ export function GeneratorPage() {
             month={lastDone.month}
             year={lastDone.year}
           />
-          {rows.length > 0 ? <CalendarPreview rows={rows} /> : null}
+          {rows.length > 0 ? <CalendarPreview rows={rows} clientId={clientId || undefined} /> : null}
         </div>
       ) : null}
     </PageWrapper>

@@ -11,9 +11,11 @@ import {
   isValidCustomSpecialtyName,
   MAX_SPECIALTIES_PER_CLIENT,
 } from "@/lib/types";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { HttpError } from "@/lib/server/http";
 import { fetchTopicHistoryLastSixMonths } from "@/lib/server/services/topicTracker";
+import { clientBrandKitSchema } from "@/lib/types/brandKit";
 
 const specialtyValue = z
   .string()
@@ -91,7 +93,9 @@ const clientBody = z.object({
   ),
   useCarousels: z.boolean().optional(),
   notes: z.string().nullable().optional(),
+  generationNotes: z.string().max(8000).nullable().optional(),
   supportingTextDefault: z.string().max(8000).nullable().optional(),
+  brandKit: clientBrandKitSchema.nullable().optional(),
   specialDays: z.array(specialDaySchema).optional(),
 });
 
@@ -102,6 +106,14 @@ function assertServicesValid(services: string[], specialty: string[]): void {
       "Invalid services: use catalog checkboxes and/or custom lines (2–120 chars). Max 40 entries. Custom lines must not use angle brackets or braces."
     );
   }
+}
+
+function brandKitToPrisma(
+  kit: z.infer<typeof clientBrandKitSchema> | null | undefined
+): Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined {
+  if (kit === undefined) return undefined;
+  if (kit === null) return Prisma.JsonNull;
+  return kit;
 }
 
 function assertCadence(postsPerMonth: number, carouselsPerMonth: number, animatedPerMonth: number): void {
@@ -143,7 +155,24 @@ export async function listClients(userId: string, searchParams: URLSearchParams)
         specialty ? { specialty: { has: specialty } } : {},
       ],
     },
-    include: { specialDays: true },
+    select: {
+      id: true,
+      name: true,
+      doctorName: true,
+      specialty: true,
+      services: true,
+      clinicName: true,
+      city: true,
+      brandType: true,
+      postsPerMonth: true,
+      carouselsPerMonth: true,
+      useCarousels: true,
+      animatedPerMonth: true,
+      notes: true,
+      createdAt: true,
+      updatedAt: true,
+      userId: true,
+    },
     orderBy: { updatedAt: "desc" },
   });
   return { success: true as const, data: clients };
@@ -181,7 +210,9 @@ export async function createClient(userId: string, body: unknown) {
       animatedPerMonth,
       useCarousels: (parsed.useCarousels ?? false) || carouselsPerMonth > 0,
       notes: parsed.notes ?? null,
+      generationNotes: parsed.generationNotes ?? null,
       supportingTextDefault: parsed.supportingTextDefault ?? null,
+      brandKit: brandKitToPrisma(parsed.brandKit),
       userId,
       specialDays: parsed.specialDays?.length
         ? {
@@ -235,10 +266,13 @@ export async function updateClient(userId: string, id: string, body: unknown) {
       animatedPerMonth: parsed.animatedPerMonth ?? existing.animatedPerMonth,
       useCarousels: parsed.useCarousels ?? existing.useCarousels,
       notes: parsed.notes === undefined ? existing.notes : parsed.notes,
+      generationNotes:
+        parsed.generationNotes === undefined ? existing.generationNotes : parsed.generationNotes,
       supportingTextDefault:
         parsed.supportingTextDefault === undefined
           ? existing.supportingTextDefault
           : parsed.supportingTextDefault,
+      ...(parsed.brandKit !== undefined ? { brandKit: brandKitToPrisma(parsed.brandKit) } : {}),
       specialDays: parsed.specialDays
         ? {
             create: parsed.specialDays.map((s) => ({

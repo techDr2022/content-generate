@@ -4,15 +4,29 @@ import {
   defaultPosterBrandAssetsState,
   defaultPosterImageOutputState,
   posterBrandPayloadFromState,
+  resolvePosterLookForIndex,
+  type ClientBrandKit,
   type PosterBrandAssetsState,
   type PosterImageOutputState,
   type PosterLookId,
 } from "@/lib/types";
+import { parseDoctorNames, resolveDoctorForPosterIndex } from "@/lib/doctors";
+import { defaultContactFromBrandKit } from "@/lib/posterLayout";
+import type { BrandType } from "@/lib/types";
+import { PosterRefineControls } from "@/components/calendar/PosterRefineControls";
+import { useClient } from "@/hooks/useClients";
 import { ImageIcon, Loader2 } from "lucide-react";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { PosterBrandAssetsControls } from "@/components/calendar/PosterBrandAssetsControls";
 import { PosterImageOutputControls } from "@/components/calendar/PosterImageOutputControls";
 import { PosterLookControls } from "@/components/calendar/PosterLookControls";
+import { PosterLookSelect } from "@/components/calendar/PosterLookSelect";
+import {
+  applyDefaultLookToAllRows,
+  buildInitialRowLooks,
+  isRowPosterLookBlocked,
+  type RowPosterLook,
+} from "@/lib/posterRowLooks";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -57,6 +71,7 @@ interface BulkOk {
   rowIndex: number;
   date: string;
   src: string;
+  mimeType: string;
   fileName: string;
 }
 
@@ -87,11 +102,10 @@ export function ImageStudioPage() {
   const [bulkTotal, setBulkTotal] = useState(0);
   const [results, setResults] = useState<BulkOk[]>([]);
   const [failures, setFailures] = useState<BulkFail[]>([]);
+  const [rowLooks, setRowLooks] = useState<Record<number, RowPosterLook>>(() => buildInitialRowLooks(0));
 
   const rowsQuery = useJobCalendarRows(jobId || undefined);
   const rows = rowsQuery.data ?? [];
-
-  const generateImage = useGeneratePosterImage();
 
   const recentDoneJobs = useMemo(() => {
     return (jobs.data ?? [])
@@ -100,13 +114,59 @@ export function ImageStudioPage() {
       .slice(0, 80);
   }, [jobs.data]);
 
+  const selectedJob = useMemo(
+    () => recentDoneJobs.find((j) => j.id === jobId),
+    [recentDoneJobs, jobId]
+  );
+  const clientQuery = useClient(selectedJob?.clientId);
+  const clientRecord = clientQuery.data;
+  const clientBrandKit: ClientBrandKit | null = clientRecord?.brandKit ?? null;
+  const clientDoctors = useMemo(() => {
+    if (!clientRecord) return [];
+    return parseDoctorNames(clientRecord.doctorName, clientRecord.brandType as BrandType);
+  }, [clientRecord]);
+
+  const generateImage = useGeneratePosterImage();
+
+  useEffect(() => {
+    const kit = clientQuery.data?.brandKit;
+    if (!kit?.defaultPosterLook) return;
+    setPosterLook(kit.defaultPosterLook);
+    const custom =
+      kit.defaultPosterLook === "custom" ? (kit.posterLookCustom ?? "") : "";
+    if (kit.defaultPosterLook === "custom" && kit.posterLookCustom) {
+      setPosterLookCustom(kit.posterLookCustom);
+    }
+    setRowLooks(
+      buildInitialRowLooks(
+        rows.length,
+        kit.defaultPosterLook,
+        kit.defaultPosterLook === "custom" ? custom : ""
+      )
+    );
+  }, [clientQuery.data?.id, clientQuery.data?.brandKit, rows.length]);
+
+  useEffect(() => {
+    const c = clientQuery.data;
+    if (!c?.brandKit?.posterFooter) return;
+    const firstDoctor = parseDoctorNames(c.doctorName, c.brandType as BrandType)[0] ?? "";
+    const preset = defaultContactFromBrandKit(c.brandKit, {
+      doctorName: firstDoctor,
+      clinicName: c.clinicName,
+      city: c.city,
+    });
+    if (!preset) return;
+    setBrandAssets((prev) => (prev.contactDetails.trim() ? prev : { ...prev, contactDetails: preset }));
+  }, [clientQuery.data?.id, clientQuery.data?.brandKit, clientQuery.data?.clinicName, clientQuery.data?.city, clientQuery.data?.doctorName, clientQuery.data?.brandType]);
+
   useEffect(() => {
     setSelected(new Set());
     setResults([]);
     setFailures([]);
     setBulkDone(0);
     setBulkTotal(0);
-  }, [jobId]);
+    setRowLooks(buildInitialRowLooks(rows.length, posterLook, posterLookCustom));
+  }, [jobId, rows.length]);
 
   const posterGenerateBlocked = posterLook === "custom" && posterLookCustom.trim().length === 0;
 
@@ -130,18 +190,42 @@ export function ImageStudioPage() {
   const selectedIndices = useMemo(() => [...selected].sort((a, b) => a - b), [selected]);
 
   const selectedRunnable = useMemo(
-    () => selectedIndices.filter((i) => rows[i]?.textInImage?.trim()),
-    [selectedIndices, rows]
+    () =>
+      selectedIndices.filter((i) => {
+        const text = rows[i]?.textInImage?.trim();
+        const look = rowLooks[i];
+        return Boolean(text && look && !isRowPosterLookBlocked(look));
+      }),
+    [selectedIndices, rowLooks, rows]
   );
+
+  const handleRowLookChange = useCallback((rowIndex: number, look: RowPosterLook) => {
+    setRowLooks((prev) => ({ ...prev, [rowIndex]: look }));
+  }, []);
+
+  const handleApplyDefaultLookToAllRows = useCallback(() => {
+    setRowLooks(applyDefaultLookToAllRows(rows.length, posterLook, posterLookCustom));
+  }, [posterLook, posterLookCustom, rows.length]);
 
   const customTexts = useMemo(() => parseCustomPosterTexts(customTextBulk), [customTextBulk]);
 
   const showPosterSettings = studioMode === "custom" || (jobId.length > 0 && rows.length > 0);
+  const showCalendarSelectRows = studioMode === "calendar" && jobId.length > 0 && rows.length > 0;
 
   async function runBulkForItems(
-    items: { rowIndex: number; text: string; label: string; fileSlug: string }[]
+    items: {
+      rowIndex: number;
+      text: string;
+      label: string;
+      fileSlug: string;
+      contentStyle?: string;
+      look?: RowPosterLook;
+    }[],
+    options?: { useGlobalLookFallback?: boolean }
   ): Promise<void> {
-    if (items.length === 0 || posterGenerateBlocked) return;
+    const useGlobalFallback = options?.useGlobalLookFallback ?? true;
+    if (items.length === 0) return;
+    if (useGlobalFallback && posterGenerateBlocked) return;
     setBulkRunning(true);
     setResults([]);
     setFailures([]);
@@ -151,22 +235,53 @@ export function ImageStudioPage() {
     const ok: BulkOk[] = [];
     const bad: BulkFail[] = [];
 
+    const kit = clientBrandKit;
+    const useStyleRotation = Boolean(kit?.rotatePosterStyles);
+    const useDoctorRotation = Boolean(kit?.rotateDoctors && clientDoctors.length > 1);
+
     for (let step = 0; step < items.length; step++) {
-      const { rowIndex, text, label, fileSlug } = items[step]!;
+      const { rowIndex, text, label, fileSlug, contentStyle, look: rowLook } = items[step]!;
+
+      let effectiveLook: PosterLookId;
+      let effectiveCustom: string | undefined;
+      if (rowLook) {
+        effectiveLook = rowLook.posterLook;
+        effectiveCustom =
+          rowLook.posterLook === "custom" ? rowLook.posterLookCustom.trim() || undefined : undefined;
+      } else {
+        const lookResolved = useStyleRotation
+          ? resolvePosterLookForIndex(kit, step, posterLook)
+          : resolvePosterLookForIndex(kit, 0, posterLook);
+        effectiveLook = lookResolved.posterLook;
+        effectiveCustom =
+          effectiveLook === "custom"
+            ? lookResolved.posterLookCustom ?? posterLookCustom.trim()
+            : undefined;
+      }
+      const featuredDoctor = resolveDoctorForPosterIndex(clientDoctors, rowIndex, useDoctorRotation);
 
       try {
         const data = await generateImage.mutateAsync({
           textInImage: text,
-          posterLook,
-          posterLookCustom: posterLook === "custom" ? posterLookCustom.trim() : undefined,
+          posterLook: effectiveLook,
+          posterLookCustom: effectiveCustom || undefined,
           ...imageOutput,
           ...posterBrandPayloadFromState(brandAssets),
+          ...(kit ? { brandKit: kit } : {}),
+          ...(contentStyle ? { contentStyle } : {}),
+          ...(featuredDoctor ? { featuredDoctor } : {}),
+          ...(clientRecord?.clinicName ? { clinicName: clientRecord.clinicName } : {}),
+          ...(clientRecord?.city ? { city: clientRecord.city } : {}),
+          ...(clientRecord?.generationNotes?.trim()
+            ? { generationNotes: clientRecord.generationNotes.trim() }
+            : {}),
         });
         const safeSlug = fileSlug.replace(/[^\w\-]+/g, "_");
         ok.push({
           rowIndex,
           date: label,
           src: `data:${data.mimeType};base64,${data.imageBase64}`,
+          mimeType: data.mimeType,
           fileName: `poster-${safeSlug}.${extFromMime(data.mimeType)}`,
         });
       } catch (e) {
@@ -187,20 +302,19 @@ export function ImageStudioPage() {
   }
 
   async function runBulkGenerate(): Promise<void> {
-    const items = selectedRunnable
-      .map((rowIndex) => {
-        const post = rows[rowIndex];
-        const text = post?.textInImage?.trim();
-        if (!text) return null;
-        return {
-          rowIndex,
-          text,
-          label: post?.date ?? "—",
-          fileSlug: post?.date ?? `row-${rowIndex}`,
-        };
-      })
-      .filter((item): item is NonNullable<typeof item> => item !== null);
-    await runBulkForItems(items);
+    const items = selectedRunnable.map((rowIndex) => {
+      const post = rows[rowIndex]!;
+      const look = rowLooks[rowIndex]!;
+      return {
+        rowIndex,
+        text: post.textInImage!.trim(),
+        label: post.date ?? "—",
+        fileSlug: post.date ?? `row-${rowIndex}`,
+        contentStyle: post.style,
+        look,
+      };
+    });
+    await runBulkForItems(items, { useGlobalLookFallback: false });
   }
 
   async function runCustomBulkGenerate(): Promise<void> {
@@ -233,21 +347,37 @@ export function ImageStudioPage() {
           <CardHeader>
             <CardTitle className="text-lg">Poster settings</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Look, brand assets, and output options apply to calendar rows and custom text alike.
+              {studioMode === "calendar"
+                ? "Brand assets and output options. Set a poster look on each row in Select rows below."
+                : "Look, brand assets, and output options apply to calendar rows and custom text alike."}
+              {clientBrandKit?.rotatePosterStyles
+                ? " This client rotates poster styles across bulk runs."
+                : null}
+              {clientBrandKit?.rotateDoctors && clientDoctors.length > 1
+                ? ` Doctors rotate across posters (${clientDoctors.join(", ")}).`
+                : null}
+              {clientBrandKit?.posterFooter
+                ? " Saved footer template is applied; add extra lines under Contact details if needed."
+                : clientBrandKit
+                  ? " Client brand kit is applied automatically."
+                  : null}
             </p>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
               <div className="space-y-4">
-                <PosterLookControls
-                  posterLook={posterLook}
-                  onPosterLookChange={setPosterLook}
-                  posterLookCustom={posterLookCustom}
-                  onPosterLookCustomChange={setPosterLookCustom}
-                />
+                {studioMode === "custom" ? (
+                  <PosterLookControls
+                    posterLook={posterLook}
+                    onPosterLookChange={setPosterLook}
+                    posterLookCustom={posterLookCustom}
+                    onPosterLookCustomChange={setPosterLookCustom}
+                  />
+                ) : null}
                 <PosterBrandAssetsControls
                   value={brandAssets}
                   onChange={(patch) => setBrandAssets((prev) => ({ ...prev, ...patch }))}
+                  hasSavedFooter={Boolean(clientBrandKit?.posterFooter)}
                 />
               </div>
               <div className="space-y-3">
@@ -411,7 +541,7 @@ export function ImageStudioPage() {
         </CardContent>
       </Card>
 
-      {studioMode === "calendar" && jobId && rows.length > 0 ? (
+      {showCalendarSelectRows ? (
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -445,6 +575,15 @@ export function ImageStudioPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            <PosterLookControls
+              posterLook={posterLook}
+              onPosterLookChange={setPosterLook}
+              posterLookCustom={posterLookCustom}
+              onPosterLookCustomChange={setPosterLookCustom}
+              onApplyToAllRows={handleApplyDefaultLookToAllRows}
+              rowCount={rows.length}
+              hint="Default look for new rows. Use Apply to copy it to every row, or set each row’s look in the table."
+            />
             <div className="overflow-x-auto rounded-md border">
               <Table>
                 <TableHeader>
@@ -452,12 +591,15 @@ export function ImageStudioPage() {
                     <TableHead className="w-10" />
                     <TableHead>Date</TableHead>
                     <TableHead>Style</TableHead>
-                    <TableHead className="min-w-[240px]">Text in image</TableHead>
+                    <TableHead className="min-w-[200px]">Text in image</TableHead>
+                    <TableHead className="min-w-[180px]">How should the poster look?</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {rows.map((row, index) => {
                     const hasText = Boolean(row.textInImage?.trim());
+                    const look = rowLooks[index] ?? { posterLook: "text_only", posterLookCustom: "" };
+                    const lookBlocked = isRowPosterLookBlocked(look);
                     return (
                       <TableRow key={`${row.date}-${index}`}>
                         <TableCell>
@@ -475,6 +617,17 @@ export function ImageStudioPage() {
                             {hasText ? row.textInImage : "No text in image"}
                           </span>
                         </TableCell>
+                        <TableCell className="align-top">
+                          <PosterLookSelect
+                            compact
+                            idPrefix={`studio-${index}-look`}
+                            value={look}
+                            onChange={(next) => handleRowLookChange(index, next)}
+                          />
+                          {lookBlocked ? (
+                            <p className="mt-1 text-[11px] text-destructive">Add custom instructions.</p>
+                          ) : null}
+                        </TableCell>
                       </TableRow>
                     );
                   })}
@@ -486,7 +639,7 @@ export function ImageStudioPage() {
               <Button
                 type="button"
                 className="gap-2"
-                disabled={bulkRunning || selectedRunnable.length === 0 || posterGenerateBlocked}
+                disabled={bulkRunning || selectedRunnable.length === 0}
                 onClick={() => void runBulkGenerate()}
               >
                 {bulkRunning ? (
@@ -496,8 +649,10 @@ export function ImageStudioPage() {
                 )}
                 {bulkRunning ? `Generating ${bulkDone} / ${bulkTotal}…` : `Generate selected (${selectedRunnable.length})`}
               </Button>
-              {posterGenerateBlocked ? (
-                <p className="text-xs text-destructive">Add custom instructions or choose another poster look.</p>
+              {selected.size > 0 && selectedRunnable.length === 0 ? (
+                <p className="text-xs text-destructive">
+                  Selected rows need text in image and a valid poster look (custom rows need instructions).
+                </p>
               ) : null}
             </div>
 
@@ -546,9 +701,29 @@ export function ImageStudioPage() {
                       alt={`Poster ${r.date}`}
                       className="w-full rounded-md border object-contain"
                     />
+                    <PosterRefineControls
+                      imageSrc={r.src}
+                      mimeType={r.mimeType}
+                      brandKit={clientBrandKit}
+                      imageOutput={imageOutput}
+                      onRefined={(src, mimeType) => {
+                        setResults((prev) =>
+                          prev.map((item) =>
+                            item.rowIndex === r.rowIndex && item.date === r.date
+                              ? {
+                                  ...item,
+                                  src,
+                                  mimeType,
+                                  fileName: item.fileName.replace(/\.[^.]+$/, `.${extFromMime(mimeType)}`),
+                                }
+                              : item
+                          )
+                        );
+                      }}
+                    />
                     <Button variant="secondary" size="sm" className="w-full" asChild>
                       <a href={r.src} download={r.fileName}>
-                        Download PNG
+                        Download
                       </a>
                     </Button>
                   </figure>

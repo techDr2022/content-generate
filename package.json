@@ -16,11 +16,11 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "prisma generate",
+    "postinstall": "node scripts/ensure-prisma-engine.mjs",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "db:generate": "prisma generate",
+    "db:generate": "node scripts/ensure-prisma-engine.mjs",
     "railway": "railway"
   },
   "dependencies": {

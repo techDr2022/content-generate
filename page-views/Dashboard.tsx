@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useClients } from "@/hooks/useClients";
 import { useJobs } from "@/hooks/useJobs";
+import { useOpenAiCredits } from "@/hooks/useOpenAiCredits";
+import { OpenAiCreditsCard } from "@/components/dashboard/OpenAiCreditsCard";
 import type { GenerationJobDTO } from "@/lib/types";
 import { api } from "@/lib/api";
 import {
@@ -21,6 +23,16 @@ import {
   periodLabel,
   type DashboardPeriod,
 } from "@/lib/dashboardPeriod";
+
+function formatUsd(amount: number | null | undefined): string {
+  if (amount == null || !Number.isFinite(amount)) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
 
 function statusBadge(status: GenerationJobDTO["status"]) {
   if (status === "done") return <Badge variant="success">done</Badge>;
@@ -44,6 +56,8 @@ export function DashboardPage() {
     () => ({ monthKey, dayKey, from: rangeFrom, to: rangeTo }),
     [monthKey, dayKey, rangeFrom, rangeTo]
   );
+
+  const openAiCredits = useOpenAiCredits(period, periodOpts);
 
   const filteredJobs = useMemo(() => {
     const list = jobs.data ?? [];
@@ -95,6 +109,13 @@ export function DashboardPage() {
         </Button>
       }
     >
+      <OpenAiCreditsCard
+        credits={openAiCredits}
+        period={period}
+        periodName={periodName}
+        formatUsd={formatUsd}
+      />
+
       <Card className="border-primary/20 bg-primary/[0.03]">
         <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -114,7 +135,7 @@ export function DashboardPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Time period</CardTitle>
           <p className="text-xs text-muted-foreground font-normal">
-            Filters rows, posters, jobs, and the table below. Queue and client totals are always current.
+            Filters rows, posters, jobs, OpenAI spend, and the table below. Queue and client totals are always current.
           </p>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">

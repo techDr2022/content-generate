@@ -31,7 +31,9 @@ export function useJobProgress(userId: string | undefined, streamSessionKey?: nu
       if ("connected" in data && data.connected) return;
       const evt = data as JobProgressEvent;
       setLastEvent(evt);
-      void qc.invalidateQueries({ queryKey: ["jobs"] });
+      if (evt.status === "done" || evt.status === "failed" || evt.status === "cancelled") {
+        void qc.invalidateQueries({ queryKey: ["jobs"] });
+      }
     });
     es.onerror = () => {
       setStreamError(

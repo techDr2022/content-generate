@@ -1,4 +1,6 @@
-import type { SpecialDayInput } from "@/lib/types";
+import type { BrandType, ClientBrandKit, SpecialDayInput } from "@/lib/types";
+import { parseDoctorNames } from "@/lib/doctors";
+import { formatBrandKitForCalendarPrompt } from "./brandKitPrompt";
 
 export interface ClientPromptProfile {
   name: string;
@@ -22,8 +24,14 @@ export interface ClientPromptProfile {
    */
   animatedCountForRun?: number;
   notes: string | null;
+  /** Instructions for AI before generating calendar copy (not internal team notes). */
+  generationNotes: string | null;
   /** Verbatim block inserted immediately before the hashtag section when non-empty. */
   supportingTextDefault: string | null;
+  /** Client brand kit: guidelines, colors, typography (for copy/visual alignment). */
+  brandKit?: ClientBrandKit | null;
+  /** Parsed doctor list for multi-doctor accounts. */
+  doctors?: string[];
 }
 
 export interface TopicHistoryPrompt {
@@ -94,6 +102,11 @@ export function buildPrompt(
   const monthName = MONTH_NAMES[month - 1] ?? String(month);
   const topicHistoryBlock = formatTopicHistory(topicHistory);
   const specialDaysBlock = formatSpecialDays(specialDays);
+  const brandKitBlock = formatBrandKitForCalendarPrompt(client.brandKit);
+  const doctors =
+    client.doctors ??
+    parseDoctorNames(client.doctorName, (client.brandType as BrandType) || "clinic");
+  const generationNotesBlock = client.generationNotes?.trim() ?? "";
 
   const carouselCountHard = typeof client.carouselCountForRun === "number";
   const animatedCountHard = typeof client.animatedCountForRun === "number";
@@ -109,7 +122,7 @@ export function buildPrompt(
       ? `- THIS RUN (hard requirement): Every row must have "type": "Poster" (total ${client.postsPerMonth} rows).`
       : `- THIS RUN (hard requirement): Exactly ${carouselN} row(s) "Carousel", exactly ${animatedN} row(s) "Animated", and exactly ${posterRemainder} row(s) "Poster" (total ${client.postsPerMonth}).
 - Carousels: step-by-step, comparisons, Do's & Don'ts, educational breakdowns.
-- Animated: motion-friendly reels-style tips, short procedure highlights, before/after concepts, dynamic educational clips.
+- Animated: Instagram Reels / short VIDEO scripts (not static posters). Each Animated row MUST have motion-friendly "textInImage": start with "▶ Reel tip:" or similar hook, 3–5 short on-screen caption lines, then CTA + clinic + city. "supportingText" should reference watching the reel once.
 - Use "Poster" for other style intents.`
     : `- Use carousels ONLY if client.useCarousels = true, and only for: step-by-step, comparisons, Do's & Don'ts, educational breakdowns
 - All others = Poster`;
@@ -340,7 +353,47 @@ FESTIVE / GREETING:
 DID YOU KNOW:
 (Use the same structural discipline as other styles: concise headline fact, 2–3 educational lines, then the required CTA and clinic/city lines per TEXT IN IMAGE rules.)
 
+ANIMATED / REEL (only when type is "Animated"):
+▶ Reel tip: [hook — one line]
+[2–4 very short lines for on-screen captions]
+[CTA]
+[Clinic Name]
+[City]
+
 You must apply the templates above faithfully when populating textInImage for each style.${
+    generationNotesBlock
+      ? `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CLIENT GENERATION NOTES (mandatory)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${generationNotesBlock}`
+      : ""
+  }${
+    doctors.length > 1
+      ? `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MULTIPLE DOCTORS (${doctors.length})
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Doctors on this account: ${doctors.map((d) => `"${d}"`).join(", ")}.
+- Distribute posts fairly across doctors in supportingText (feature the named doctor naturally in each caption).
+- Do not put doctor names inside textInImage (global TEXT IN IMAGE rules still apply); clinic name and city stay in image text footer lines.
+- When brandKit poster header/footer templates use [Doctor Name], mentally assign a doctor per post in rotation so posters can be paired later.`
+      : ""
+  }${
+    brandKitBlock
+      ? `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CLIENT BRAND & DESIGN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${brandKitBlock}`
+      : ""
+  }${
     isTechDrClient(client)
       ? `
 
@@ -397,7 +450,10 @@ ${JSON.stringify(
       ...(carouselCountHard ? { carouselCountForRun: carouselN } : {}),
       ...(animatedCountHard ? { animatedCountForRun: animatedN } : {}),
       notes: client.notes,
+      generationNotes: client.generationNotes,
       supportingTextDefault: client.supportingTextDefault,
+      doctors,
+      ...(client.brandKit ? { brandKit: client.brandKit } : {}),
     },
     null,
     2

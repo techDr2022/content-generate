@@ -90,7 +90,7 @@ export function JobCalendarViewPage(): JSX.Element {
         </aside>
         <div className="min-w-0 flex-1 space-y-4">
           {rows.length > 0 ? (
-            <CalendarPreview rows={rows} />
+            <CalendarPreview rows={rows} clientId={j.clientId} />
           ) : rowsQuery.isLoading ? (
             <p className="rounded-lg border bg-card px-4 py-8 text-center text-sm text-muted-foreground shadow-sm">
               Loading calendar rows…

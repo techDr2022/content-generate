@@ -45,9 +45,10 @@ import type { ClientSpecialDaySuggestion } from "@/hooks/useClients";
 import { useSuggestServices } from "@/hooks/useClients";
 import { ClientSuggestedSpecialDaysPanel } from "@/components/clients/ClientSuggestedSpecialDaysPanel";
 import { cn } from "@/lib/utils";
-import type { BrandType } from "@/lib/types";
-
-const DOCTOR_NAME_SEPARATOR = ", ";
+import type { BrandType, ClientBrandKit } from "@/lib/types";
+import { emptyBrandKit } from "@/lib/types";
+import { doctorsToDoctorName, parseDoctorNames } from "@/lib/doctors";
+import { BrandKitSection } from "@/components/clients/BrandKitSection";
 
 const CLIENT_TYPE_OPTIONS = [
   { value: "clinic" as const, label: "Clinic", icon: Building2 },
@@ -59,21 +60,11 @@ function isOrganizationBrand(brandType: BrandType): boolean {
   return brandType === "clinic" || brandType === "hospital";
 }
 
-export function doctorsToDoctorName(doctors: string[], brandType: BrandType): string {
-  const trimmed = doctors.map((d) => d.trim()).filter(Boolean);
-  if (trimmed.length === 0) return "";
-  if (brandType === "personal") return trimmed[0];
-  return trimmed.join(DOCTOR_NAME_SEPARATOR);
-}
+export { doctorsToDoctorName } from "@/lib/doctors";
 
 function parseDoctorsFromClient(client: ClientDTO): string[] {
-  const name = client.doctorName.trim();
-  if (client.brandType === "personal") {
-    return name ? [name] : [""];
-  }
-  if (!name) return [""];
-  const parts = name.split(DOCTOR_NAME_SEPARATOR).map((s) => s.trim()).filter(Boolean);
-  return parts.length > 0 ? parts : [name];
+  const parsed = parseDoctorNames(client.doctorName, client.brandType as BrandType);
+  return parsed.length > 0 ? parsed : [""];
 }
 
 export interface ClientFormValues {
@@ -90,8 +81,11 @@ export interface ClientFormValues {
   animatedPerMonth: number;
   useCarousels: boolean;
   notes: string;
+  /** Instructions for AI when generating calendar copy and posters */
+  generationNotes: string;
   /** Verbatim block placed before hashtags in generated supporting text */
   supportingTextDefault: string;
+  brandKit: ClientBrandKit;
   specialDays: { label: string; date: string; type: "festival" | "awareness" | "campaign" }[];
 }
 
@@ -150,7 +144,9 @@ function mapInitial(client: ClientDTO | null | undefined): ClientFormValues {
       animatedPerMonth: 0,
       useCarousels: false,
       notes: "",
+      generationNotes: "",
       supportingTextDefault: "",
+      brandKit: emptyBrandKit(),
       specialDays: [],
     };
   }
@@ -169,7 +165,9 @@ function mapInitial(client: ClientDTO | null | undefined): ClientFormValues {
     ),
     useCarousels: client.useCarousels,
     notes: client.notes ?? "",
+    generationNotes: client.generationNotes ?? "",
     supportingTextDefault: client.supportingTextDefault ?? "",
+    brandKit: client.brandKit ? { ...client.brandKit } : emptyBrandKit(),
     specialDays: (client.specialDays as SpecialDayDTO[] | undefined)?.map((s) => ({
       label: s.label,
       date: s.date,
@@ -1005,6 +1003,41 @@ export function ClientForm({ initial, onSubmit, onCancel, submitting, onDelete, 
             </div>
           </div>
         )}
+      </div>
+
+      <Separator />
+
+      <div className="space-y-2">
+        <div>
+          <Label htmlFor="generation-notes">AI generation notes</Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Instructions for the AI before it generates calendar copy or posters (tone, topics to avoid, mandatory
+            phrases, etc.). Not the same as internal team notes below.
+          </p>
+        </div>
+        <Textarea
+          id="generation-notes"
+          rows={4}
+          maxLength={8000}
+          placeholder="e.g. Always mention teleconsult option; avoid competitor names; use warm bilingual tone…"
+          value={values.generationNotes}
+          onChange={(e) => setValues({ ...values, generationNotes: e.target.value })}
+        />
+      </div>
+
+      <Separator />
+
+      <div className="space-y-3">
+        <div>
+          <Label className="text-base">Brand kit & poster styles</Label>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Colors, fonts, grid, guidelines, and multi-style rotation for poster generation.
+          </p>
+        </div>
+        <BrandKitSection
+          value={values.brandKit}
+          onChange={(brandKit) => setValues({ ...values, brandKit })}
+        />
       </div>
 
       <Separator />

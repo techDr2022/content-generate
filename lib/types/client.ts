@@ -1,3 +1,5 @@
+import type { ClientBrandKit } from "./brandKit";
+
 export const MEDICAL_SPECIALTIES = [
   "Gynaecology",
   "Cosmetic Gynecology",
@@ -117,8 +119,12 @@ export interface ClientDTO {
   /** Fixed Animated rows per month (0–10), added on top of posters and carousels. */
   animatedPerMonth?: number;
   notes: string | null;
+  /** AI instructions for calendar and poster generation (not shown as internal notes). */
+  generationNotes: string | null;
   /** If set, generation inserts this verbatim immediately before the hashtag block in supporting text. */
   supportingTextDefault: string | null;
+  /** Brand colors, typography, grid, poster style defaults, and design guidelines. */
+  brandKit?: ClientBrandKit | null;
   createdAt: string;
   updatedAt: string;
   userId: string;

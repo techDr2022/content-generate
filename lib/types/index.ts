@@ -1,4 +1,5 @@
 export * from "./client";
+export * from "./brandKit";
 export * from "./specialtyServices";
 export * from "./calendar";
 export * from "./job";

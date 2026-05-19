@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
 import { posterBrandPayloadFromState, type CalendarPost, type PosterBrandAssetsState, type PosterImageOutputState, type PosterLookId } from "@/lib/types";
+import type { RowPosterLook } from "@/lib/posterRowLooks";
+import { isRowPosterLookBlocked } from "@/lib/posterRowLooks";
 import { useGeneratePosterImage } from "@/hooks/useGenerator";
 
 export function posterRowKey(post: CalendarPost, index: number): string {
@@ -7,14 +9,42 @@ export function posterRowKey(post: CalendarPost, index: number): string {
 }
 
 export interface PosterImageFlowOptions {
+  /** Fallback when getRowLook is not provided or returns undefined. */
   posterLook: PosterLookId;
   posterLookCustom: string;
+  getRowLook?: (rowIndex: number) => RowPosterLook | undefined;
   imageOutput: PosterImageOutputState;
   brandAssets: PosterBrandAssetsState;
+  clientId?: string;
+  brandKit?: import("@/lib/types").ClientBrandKit | null;
+  clinicName?: string;
+  city?: string;
+  generationNotes?: string | null;
+  featuredDoctorForRow?: (rowIndex: number) => string | undefined;
+}
+
+function resolveRowLook(
+  rowIndex: number,
+  fallback: { posterLook: PosterLookId; posterLookCustom: string },
+  getRowLook?: (rowIndex: number) => RowPosterLook | undefined
+): RowPosterLook {
+  return getRowLook?.(rowIndex) ?? { posterLook: fallback.posterLook, posterLookCustom: fallback.posterLookCustom };
 }
 
 export function usePosterImageFlow(opts: PosterImageFlowOptions) {
-  const { posterLook, posterLookCustom, imageOutput, brandAssets } = opts;
+  const {
+    posterLook,
+    posterLookCustom,
+    getRowLook,
+    imageOutput,
+    brandAssets,
+    clientId,
+    brandKit,
+    clinicName,
+    city,
+    generationNotes,
+    featuredDoctorForRow,
+  } = opts;
   const generateImage = useGeneratePosterImage();
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -32,6 +62,9 @@ export function usePosterImageFlow(opts: PosterImageFlowOptions) {
     async (post: CalendarPost, rowIndex: number) => {
       const text = post.textInImage?.trim();
       if (!text) return;
+      const look = resolveRowLook(rowIndex, { posterLook, posterLookCustom }, getRowLook);
+      if (isRowPosterLookBlocked(look)) return;
+
       const key = posterRowKey(post, rowIndex);
       setLoadingKey(key);
       setDialogError(null);
@@ -41,10 +74,18 @@ export function usePosterImageFlow(opts: PosterImageFlowOptions) {
       try {
         const data = await generateImage.mutateAsync({
           textInImage: text,
-          posterLook,
-          posterLookCustom: posterLook === "custom" ? posterLookCustom.trim() : undefined,
+          posterLook: look.posterLook,
+          posterLookCustom: look.posterLook === "custom" ? look.posterLookCustom.trim() : undefined,
+          contentStyle: post.style,
           ...imageOutput,
           ...posterBrandPayloadFromState(brandAssets),
+          ...(brandKit ? { brandKit } : {}),
+          ...(clinicName ? { clinicName } : {}),
+          ...(featuredDoctorForRow?.(rowIndex)
+            ? { featuredDoctor: featuredDoctorForRow(rowIndex) }
+            : {}),
+          ...(city ? { city } : {}),
+          ...(generationNotes?.trim() ? { generationNotes: generationNotes.trim() } : {}),
         });
         const src = `data:${data.mimeType};base64,${data.imageBase64}`;
         setPreviewSrc(src);
@@ -55,7 +96,18 @@ export function usePosterImageFlow(opts: PosterImageFlowOptions) {
         setLoadingKey(null);
       }
     },
-    [brandAssets, generateImage, imageOutput, posterLook, posterLookCustom]
+    [
+      brandAssets,
+      brandKit,
+      city,
+      clinicName,
+      generateImage,
+      generationNotes,
+      getRowLook,
+      imageOutput,
+      posterLook,
+      posterLookCustom,
+    ]
   );
 
   const showLoading = generateImage.isPending && !previewSrc && !dialogError;

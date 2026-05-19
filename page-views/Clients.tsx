@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { ClientForm, doctorsToDoctorName, type ClientFormValues } from "@/compon
 import { useClients, useCreateClient, useDeleteClient, useUpdateClient } from "@/hooks/useClients";
 import { normalizeClientCadence } from "@/lib/cadenceClamps";
 import type { ClientDTO } from "@/lib/types";
+import { sanitizeBrandKitForSave } from "@/lib/types";
 
 function apiErrorMessage(err: unknown): string {
   if (axios.isAxiosError(err)) {
@@ -23,12 +24,18 @@ function apiErrorMessage(err: unknown): string {
 
 export function ClientsPage() {
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [specialty, setSpecialty] = useState("");
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(id);
+  }, [search]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ClientDTO | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const filters = useMemo(() => ({ q: search, specialty }), [search, specialty]);
+  const filters = useMemo(() => ({ q: debouncedSearch, specialty }), [debouncedSearch, specialty]);
   const clients = useClients(filters);
   const create = useCreateClient();
   const update = useUpdateClient();
@@ -65,9 +72,11 @@ export function ClientsPage() {
       ),
       useCarousels: values.useCarousels,
       notes: values.notes || null,
+      generationNotes: values.generationNotes.trim() || null,
       supportingTextDefault: values.supportingTextDefault.trim() || null,
       specialDays: values.specialDays.filter((s) => s.label && s.date),
       services: values.services,
+      brandKit: sanitizeBrandKitForSave(values.brandKit),
     };
     try {
       if (editing) {
