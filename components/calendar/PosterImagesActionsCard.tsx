@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import type { CalendarPost } from "@/lib/types";
 import type { RowPosterLook } from "@/lib/posterRowLooks";
 import { isRowPosterLookBlocked } from "@/lib/posterRowLooks";
@@ -180,7 +181,14 @@ export function PosterImagesActionsCard({
             {bulkResults.map((r) => (
               <figure key={`${r.rowIndex}-${r.date}`} className="space-y-2 rounded-lg border bg-white p-2 shadow-sm">
                 <figcaption className="text-xs font-medium">{r.date}</figcaption>
-                <img src={r.src} alt={`Poster ${r.date}`} className="w-full rounded border object-contain" />
+                <Image
+                  src={r.src}
+                  alt={`Poster ${r.date}`}
+                  width={800}
+                  height={800}
+                  unoptimized
+                  className="h-auto w-full rounded border object-contain"
+                />
                 <Button variant="secondary" size="sm" className="w-full" asChild>
                   <a href={r.src} download={r.fileName}>
                     Download

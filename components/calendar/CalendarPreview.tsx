@@ -87,7 +87,7 @@ export function CalendarPreview({ rows, clientId }: CalendarPreviewProps) {
     setBulkDone(0);
     setBulkTotal(0);
     setSelected(new Set());
-  }, [rows]);
+  }, [rows, defaultPosterLook, defaultPosterLookCustom]);
 
   useEffect(() => {
     const kit = clientRecord?.brandKit;
@@ -117,7 +117,7 @@ export function CalendarPreview({ rows, clientId }: CalendarPreviewProps) {
     });
     if (!preset) return;
     setBrandAssets((prev) => (prev.contactDetails.trim() ? prev : { ...prev, contactDetails: preset }));
-  }, [clientRecord?.id, clientRecord?.brandKit, clientRecord?.clinicName, clientRecord?.city, clientRecord?.doctorName, clientRecord?.brandType]);
+  }, [clientRecord]);
 
   const getRowLook = useCallback((rowIndex: number) => rowLooks[rowIndex], [rowLooks]);
 

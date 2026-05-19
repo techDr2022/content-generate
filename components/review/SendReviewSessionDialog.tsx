@@ -32,7 +32,7 @@ export function SendReviewSessionDialog({
   const [success, setSuccess] = useState<{ reviewUrl: string; expiresAt: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const sendReview = useMutation({
+  const { mutate: sendReviewMutate, reset: resetSendReview, ...sendReview } = useMutation({
     mutationFn: async () => {
       if (!calendarId) throw new Error("Missing calendar");
       const res = await api.post<{
@@ -63,14 +63,14 @@ export function SendReviewSessionDialog({
     setSuccess(null);
     setCopied(false);
     if (calendarId) {
-      void sendReview.mutate();
+      void sendReviewMutate();
     }
-  }, [open, calendarId]);
+  }, [open, calendarId, sendReviewMutate]);
 
   function handleClose(openNext: boolean): void {
     if (!openNext) {
       setSuccess(null);
-      sendReview.reset();
+      resetSendReview();
     }
     onOpenChange(openNext);
   }
@@ -130,7 +130,7 @@ export function SendReviewSessionDialog({
                 {loading ? "Cancel" : "Close"}
               </Button>
               {!loading && !success ? (
-                <Button type="button" disabled={!calendarId} onClick={() => void sendReview.mutate()}>
+                <Button type="button" disabled={!calendarId} onClick={() => void sendReviewMutate()}>
                   Try again
                 </Button>
               ) : null}

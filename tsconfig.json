@@ -13,7 +13,7 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "tsBuildInfoFile": ".next/cache/tsconfig.tsbuildinfo",
+    "tsBuildInfoFile": "node_modules/.cache/tsconfig.tsbuildinfo",
     "plugins": [{ "name": "next" }],
     "paths": {
       "@/*": ["./*"]
