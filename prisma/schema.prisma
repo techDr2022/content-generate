@@ -79,6 +79,8 @@ model GenerationJob {
   month     Int
   year      Int
   postCount Int
+  /** Poster-type rows in the completed calendar (set when status becomes done). */
+  posterCount Int?
   /** Extra enqueue fields for serverless/cron replay (e.g. extra special days, overrides). */
   payload   Json?
   fileUrl   String?

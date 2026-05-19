@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -13,10 +12,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api, getApiErrorMessage } from "@/lib/api";
-
-function isLikelyValidEmail(s: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
-}
 
 export interface SendReviewSessionDialogProps {
   open: boolean;
@@ -33,23 +28,9 @@ export function SendReviewSessionDialog({
   onSent,
 }: SendReviewSessionDialogProps): JSX.Element {
   const qc = useQueryClient();
-  const [email, setEmail] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [success, setSuccess] = useState<{ reviewUrl: string; expiresAt: string } | null>(null);
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setEmail("");
-      setErr(null);
-      setSuccess(null);
-      setCopied(false);
-    }
-  }, [open, calendarId]);
-
-  const emailTrim = email.trim();
-  const emailBlocking =
-    emailTrim.length > 0 && !isLikelyValidEmail(emailTrim);
 
   const sendReview = useMutation({
     mutationFn: async () => {
@@ -58,10 +39,7 @@ export function SendReviewSessionDialog({
         success: boolean;
         data?: { sessionId: string; reviewUrl: string; expiresAt: string };
         error?: string;
-      }>("/api/review/sessions", {
-        calendarId,
-        ...(emailTrim.length > 0 ? { email: emailTrim } : {}),
-      });
+      }>("/api/review/sessions", { calendarId });
       if (!res.data.success || !res.data.data) {
         throw new Error(res.data.error ?? "Failed to create session");
       }
@@ -79,9 +57,20 @@ export function SendReviewSessionDialog({
     },
   });
 
+  useEffect(() => {
+    if (!open) return;
+    setErr(null);
+    setSuccess(null);
+    setCopied(false);
+    if (calendarId) {
+      void sendReview.mutate();
+    }
+  }, [open, calendarId]);
+
   function handleClose(openNext: boolean): void {
     if (!openNext) {
       setSuccess(null);
+      sendReview.reset();
     }
     onOpenChange(openNext);
   }
@@ -97,17 +86,24 @@ export function SendReviewSessionDialog({
     }
   }
 
+  const loading = sendReview.isPending && !success;
+  const title = success ? "Review link ready" : loading ? "Creating review link…" : "Share review link";
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{success ? "Review link ready" : "Send for review"}</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        {success ? (
+        {loading ? (
+          <p className="py-2 text-sm text-muted-foreground">
+            Generating a link you can copy and send to your client.
+          </p>
+        ) : success ? (
           <div className="space-y-3 py-2">
             <p className="text-sm text-muted-foreground">
-              Share this link with your client (for example in WhatsApp). The link signs them in—no separate PIN
-              needed when they open it from here.
+              Copy this link and send it to your client (for example in WhatsApp). Opening the link signs them in—no
+              separate PIN needed.
             </p>
             <div className="flex gap-2">
               <Input readOnly value={success.reviewUrl} className="font-mono text-xs" />
@@ -115,31 +111,12 @@ export function SendReviewSessionDialog({
                 {copied ? "Copied" : "Copy"}
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Expires {new Date(success.expiresAt).toLocaleString()}
-              {emailTrim.length > 0 ? " · We also emailed the invite." : null}
-            </p>
+            <p className="text-xs text-muted-foreground">Expires {new Date(success.expiresAt).toLocaleString()}</p>
             {err ? <p className="text-sm text-destructive">{err}</p> : null}
           </div>
         ) : (
           <div className="space-y-2 py-2">
-            <div>
-              <Label htmlFor="send-review-email">Client email (optional)</Label>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Just need a link to share in WhatsApp? Leave this blank—we will show a copyable link on the next
-                step. Add an email if you want the invite sent automatically too.
-              </p>
-              <Input
-                id="send-review-email"
-                type="email"
-                className="mt-2"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="contact@clinic.com"
-                autoComplete="email"
-              />
-            </div>
-            {err ? <p className="text-sm text-destructive">{err}</p> : null}
+            <p className="text-sm text-muted-foreground">{err ?? "Could not create a review link. Try again."}</p>
           </div>
         )}
         <DialogFooter>
@@ -150,15 +127,13 @@ export function SendReviewSessionDialog({
           ) : (
             <>
               <Button type="button" variant="outline" onClick={() => handleClose(false)}>
-                Cancel
+                {loading ? "Cancel" : "Close"}
               </Button>
-              <Button
-                type="button"
-                disabled={sendReview.isPending || emailBlocking || !calendarId}
-                onClick={() => void sendReview.mutateAsync()}
-              >
-                {sendReview.isPending ? "Creating…" : emailTrim.length > 0 ? "Email invite & create link" : "Create link"}
-              </Button>
+              {!loading && !success ? (
+                <Button type="button" disabled={!calendarId} onClick={() => void sendReview.mutate()}>
+                  Try again
+                </Button>
+              ) : null}
             </>
           )}
         </DialogFooter>

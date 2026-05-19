@@ -428,10 +428,11 @@ export async function executeGenerationJob(
     await throwIfCancelled(jobId);
 
     const fileUrl = await persistWorkbookForJob(jobId, workbookBuffer);
+    const posterCount = posts.filter((p) => p.type === "Poster").length;
 
     await prisma.generationJob.update({
       where: { id: jobId },
-      data: { status: "done", fileUrl, errorMsg: null },
+      data: { status: "done", fileUrl, errorMsg: null, posterCount },
     });
 
     await progress.updateProgress({ step: "upload_complete", pct: 100 });

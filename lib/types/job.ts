@@ -8,6 +8,8 @@ export interface GenerationJobDTO {
   month: number;
   year: number;
   postCount: number;
+  /** Poster-type rows; null on jobs completed before this field existed. */
+  posterCount: number | null;
   fileUrl: string | null;
   errorMsg: string | null;
   createdAt: string;
