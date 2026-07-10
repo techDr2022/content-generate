@@ -5,16 +5,25 @@ import {
   defaultPosterImageOutputState,
   posterBrandPayloadFromState,
   resolvePosterLookForIndex,
+  POSTER_STYLE_VARIATION_IDS,
+  POSTER_STYLE_VARIATION_LABELS,
   type ClientBrandKit,
   type PosterBrandAssetsState,
   type PosterImageOutputState,
   type PosterLookId,
+  type PosterStyleVariationId,
 } from "@/lib/types";
 import { parseDoctorNames, resolveDoctorForPosterIndex } from "@/lib/doctors";
 import { defaultContactFromBrandKit } from "@/lib/posterLayout";
+import {
+  buildPosterTextFromContentInput,
+  emptyPosterContentInput,
+  posterContentInputHasText,
+  type PosterContentInput,
+} from "@/lib/posterContentInput";
 import type { BrandType } from "@/lib/types";
 import { PosterRefineControls } from "@/components/calendar/PosterRefineControls";
-import { useClient } from "@/hooks/useClients";
+import { useClient, useClients } from "@/hooks/useClients";
 import { ImageIcon, Loader2 } from "lucide-react";
 import { PageWrapper } from "@/components/layout/PageWrapper";
 import { PosterBrandAssetsControls } from "@/components/calendar/PosterBrandAssetsControls";
@@ -30,6 +39,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -51,6 +61,17 @@ import { cn } from "@/lib/utils";
 const POSTER_BULK_CONCURRENCY = 2;
 
 type StudioMode = "calendar" | "custom";
+type CustomInputMode = "structured" | "bulk";
+
+const CONTENT_FIELDS: { key: keyof PosterContentInput; label: string; multiline?: boolean }[] = [
+  { key: "headline", label: "Headline" },
+  { key: "subheadline", label: "Subheadline" },
+  { key: "bodyCopy", label: "Body Copy", multiline: true },
+  { key: "cta", label: "CTA" },
+  { key: "offer", label: "Offer" },
+  { key: "disclaimer", label: "Disclaimer", multiline: true },
+  { key: "hashtags", label: "Hashtags (optional)" },
+];
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -91,9 +112,15 @@ function customPosterLabel(text: string, index: number): string {
   return firstLine ? `Poster ${index + 1}: ${firstLine}` : `Poster ${index + 1}`;
 }
 
-export function ImageStudioPage() {
+export function ImageGenerationPage() {
   const jobs = useJobs();
+  const clientsQuery = useClients();
   const [studioMode, setStudioMode] = useState<StudioMode>("custom");
+  const [customInputMode, setCustomInputMode] = useState<CustomInputMode>("structured");
+  const [customClientId, setCustomClientId] = useState("");
+  const [contentInput, setContentInput] = useState<PosterContentInput>(() => emptyPosterContentInput());
+  const [improveCopy, setImproveCopy] = useState(false);
+  const [styleVariation, setStyleVariation] = useState<PosterStyleVariationId>("healthcare_premium");
   const [customTextBulk, setCustomTextBulk] = useState("");
   const [jobId, setJobId] = useState<string>("");
   const [posterLook, setPosterLook] = useState<PosterLookId>("text_only");
@@ -122,7 +149,8 @@ export function ImageStudioPage() {
     () => recentDoneJobs.find((j) => j.id === jobId),
     [recentDoneJobs, jobId]
   );
-  const clientQuery = useClient(selectedJob?.clientId);
+  const activeClientId = studioMode === "calendar" ? selectedJob?.clientId : customClientId || undefined;
+  const clientQuery = useClient(activeClientId);
   const clientRecord = clientQuery.data;
   const clientBrandKit: ClientBrandKit | null = clientRecord?.brandKit ?? null;
   const clientDoctors = useMemo(() => {
@@ -211,7 +239,15 @@ export function ImageStudioPage() {
     setRowLooks(applyDefaultLookToAllRows(rows.length, posterLook, posterLookCustom));
   }, [posterLook, posterLookCustom, rows.length]);
 
-  const customTexts = useMemo(() => parseCustomPosterTexts(customTextBulk), [customTextBulk]);
+  const customTexts = useMemo(() => {
+    if (customInputMode === "structured") {
+      const text = buildPosterTextFromContentInput(contentInput);
+      return text.trim() ? [text] : [];
+    }
+    return parseCustomPosterTexts(customTextBulk);
+  }, [customInputMode, contentInput, customTextBulk]);
+
+  const structuredReady = customInputMode === "structured" && posterContentInputHasText(contentInput);
 
   const showPosterSettings = studioMode === "custom" || (jobId.length > 0 && rows.length > 0);
   const showCalendarSelectRows = studioMode === "calendar" && jobId.length > 0 && rows.length > 0;
@@ -267,6 +303,9 @@ export function ImageStudioPage() {
           textInImage: text,
           posterLook: effectiveLook,
           posterLookCustom: effectiveCustom || undefined,
+          styleVariation,
+          styleVariationIndex: step,
+          improveCopy,
           ...imageOutput,
           ...posterBrandPayloadFromState(brandAssets),
           ...(kit ? { brandKit: kit } : {}),
@@ -349,8 +388,8 @@ export function ImageStudioPage() {
 
   return (
     <PageWrapper
-      title="Poster images"
-      description="Create your own posters in bulk with custom text, or generate from a completed calendar job."
+      title="Image Generation"
+      description="Design premium social-ready posters from your copy. Brand Kit colors, fonts, and layout rules apply automatically per client."
       className="max-w-7xl"
     >
       {showPosterSettings ? (
@@ -378,13 +417,58 @@ export function ImageStudioPage() {
             <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
               <div className="space-y-4">
                 {studioMode === "custom" ? (
-                  <PosterLookControls
-                    posterLook={posterLook}
-                    onPosterLookChange={setPosterLook}
-                    posterLookCustom={posterLookCustom}
-                    onPosterLookCustomChange={setPosterLookCustom}
-                  />
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="studio-client">Client (Brand Kit)</Label>
+                      <Select value={customClientId || undefined} onValueChange={setCustomClientId}>
+                        <SelectTrigger id="studio-client" className="max-w-md">
+                          <SelectValue placeholder="Select client for brand colors & fonts…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(clientsQuery.data ?? []).map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <PosterLookControls
+                      posterLook={posterLook}
+                      onPosterLookChange={setPosterLook}
+                      posterLookCustom={posterLookCustom}
+                      onPosterLookCustomChange={setPosterLookCustom}
+                    />
+                  </>
                 ) : null}
+                <div className="space-y-2">
+                  <Label htmlFor="style-variation">Style variation</Label>
+                  <Select
+                    value={styleVariation}
+                    onValueChange={(v) => setStyleVariation(v as PosterStyleVariationId)}
+                  >
+                    <SelectTrigger id="style-variation" className="max-w-md">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {POSTER_STYLE_VARIATION_IDS.map((id) => (
+                        <SelectItem key={id} value={id}>
+                          {POSTER_STYLE_VARIATION_LABELS[id]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="improve-copy"
+                    checked={improveCopy}
+                    onCheckedChange={(v) => setImproveCopy(v === true)}
+                  />
+                  <Label htmlFor="improve-copy" className="text-sm font-normal">
+                    Improve copy (allow light wording polish)
+                  </Label>
+                </div>
                 <PosterBrandAssetsControls
                   value={brandAssets}
                   onChange={(patch) => setBrandAssets((prev) => ({ ...prev, ...patch }))}
@@ -408,12 +492,12 @@ export function ImageStudioPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <CardTitle className="text-lg">
-                {studioMode === "custom" ? "Bulk poster text" : "Calendar source"}
+                {studioMode === "custom" ? "Poster content" : "Calendar source"}
               </CardTitle>
               <p className="text-sm text-muted-foreground">
                 {studioMode === "calendar"
                   ? "Load a completed generator job and pick rows."
-                  : "Paste one or more posters below, then generate them all at once. No calendar job needed."}
+                  : "Enter headline, body, CTA, and other fields — or switch to bulk text mode."}
               </p>
             </div>
             <div className="flex shrink-0 rounded-lg border p-0.5" role="group" aria-label="Poster source">
@@ -486,24 +570,88 @@ export function ImageStudioPage() {
             </>
           ) : (
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="studio-custom-text">Poster text</Label>
-                <Textarea
-                  id="studio-custom-text"
-                  value={customTextBulk}
-                  onChange={(e) => setCustomTextBulk(e.target.value)}
+              <div className="flex shrink-0 rounded-lg border p-0.5 w-fit" role="group" aria-label="Content input mode">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={customInputMode === "structured" ? "default" : "ghost"}
+                  className="rounded-md"
                   disabled={bulkRunning}
-                  placeholder={`Heart health matters.\n\nBook an appointment\nSunrise Clinic\nAustin\n\n---\n\nSecond poster headline…`}
-                  className="min-h-[200px] font-mono text-xs leading-relaxed"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Use line breaks for multi-line posters. For multiple posters, put a line with only{" "}
-                  <span className="font-medium text-foreground">---</span> between each block.
-                  {customTexts.length > 0 ? ` ${customTexts.length} poster(s) ready to generate.` : ""}
-                </p>
+                  onClick={() => setCustomInputMode("structured")}
+                >
+                  Structured fields
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={customInputMode === "bulk" ? "default" : "ghost"}
+                  className="rounded-md"
+                  disabled={bulkRunning}
+                  onClick={() => setCustomInputMode("bulk")}
+                >
+                  Bulk text
+                </Button>
               </div>
 
-              {customTexts.length > 0 ? (
+              {customInputMode === "structured" ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {CONTENT_FIELDS.map(({ key, label, multiline }) => (
+                    <div key={key} className={multiline ? "sm:col-span-2 space-y-2" : "space-y-2"}>
+                      <Label htmlFor={`content-${key}`}>{label}</Label>
+                      {multiline ? (
+                        <Textarea
+                          id={`content-${key}`}
+                          value={contentInput[key]}
+                          onChange={(e) =>
+                            setContentInput((prev) => ({ ...prev, [key]: e.target.value }))
+                          }
+                          disabled={bulkRunning}
+                          rows={3}
+                          className="text-sm"
+                        />
+                      ) : (
+                        <Input
+                          id={`content-${key}`}
+                          value={contentInput[key]}
+                          onChange={(e) =>
+                            setContentInput((prev) => ({ ...prev, [key]: e.target.value }))
+                          }
+                          disabled={bulkRunning}
+                          className="text-sm"
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="studio-custom-text">Poster text</Label>
+                  <Textarea
+                    id="studio-custom-text"
+                    value={customTextBulk}
+                    onChange={(e) => setCustomTextBulk(e.target.value)}
+                    disabled={bulkRunning}
+                    placeholder={`Headline: Heart health matters\nSubheadline: Small steps, big impact\nBody Copy: …\nCTA: Book an appointment\n\n---\n\nSecond poster…`}
+                    className="min-h-[200px] font-mono text-xs leading-relaxed"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Use line breaks for multi-line posters. For multiple posters, put a line with only{" "}
+                    <span className="font-medium text-foreground">---</span> between each block.
+                    {customTexts.length > 0 ? ` ${customTexts.length} poster(s) ready to generate.` : ""}
+                  </p>
+                </div>
+              )}
+
+              {customInputMode === "structured" && structuredReady ? (
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <p className="text-xs font-medium text-foreground mb-2">Preview</p>
+                  <pre className="whitespace-pre-wrap text-xs text-muted-foreground font-mono">
+                    {buildPosterTextFromContentInput(contentInput)}
+                  </pre>
+                </div>
+              ) : null}
+
+              {customInputMode === "bulk" && customTexts.length > 0 ? (
                 <div className="space-y-2 rounded-md border bg-muted/30 p-3">
                   <p className="text-xs font-medium text-foreground">Preview ({customTexts.length})</p>
                   <ul className="max-h-48 space-y-2 overflow-y-auto">

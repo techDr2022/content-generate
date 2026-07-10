@@ -12,8 +12,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useClients } from "@/hooks/useClients";
 import { useJobs } from "@/hooks/useJobs";
-import { useOpenAiCredits } from "@/hooks/useOpenAiCredits";
-import { OpenAiCreditsCard } from "@/components/dashboard/OpenAiCreditsCard";
 import type { GenerationJobDTO } from "@/lib/types";
 import { api } from "@/lib/api";
 import {
@@ -23,16 +21,6 @@ import {
   periodLabel,
   type DashboardPeriod,
 } from "@/lib/dashboardPeriod";
-
-function formatUsd(amount: number | null | undefined): string {
-  if (amount == null || !Number.isFinite(amount)) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
 
 function statusBadge(status: GenerationJobDTO["status"]) {
   if (status === "done") return <Badge variant="success">done</Badge>;
@@ -57,7 +45,6 @@ export function DashboardPage() {
     [monthKey, dayKey, rangeFrom, rangeTo]
   );
 
-  const openAiCredits = useOpenAiCredits(period, periodOpts);
 
   const filteredJobs = useMemo(() => {
     const list = jobs.data ?? [];
@@ -73,7 +60,7 @@ export function DashboardPage() {
     const ready = list.filter((j) => j.status === "done").length;
     const doneInPeriod = filteredJobs.filter((j) => j.status === "done");
     const rowsGenerated = doneInPeriod.reduce((sum, j) => sum + j.postCount, 0);
-    const postersGenerated = doneInPeriod.reduce(
+    const posterRows = doneInPeriod.reduce(
       (sum, j) => sum + (typeof j.posterCount === "number" ? j.posterCount : j.postCount),
       0
     );
@@ -83,7 +70,7 @@ export function DashboardPage() {
       queued,
       ready,
       rowsGenerated,
-      postersGenerated,
+      posterRows,
     };
   }, [clients.data, jobs.data, filteredJobs]);
 
@@ -109,13 +96,6 @@ export function DashboardPage() {
         </Button>
       }
     >
-      <OpenAiCreditsCard
-        credits={openAiCredits}
-        period={period}
-        periodName={periodName}
-        formatUsd={formatUsd}
-      />
-
       <Card className="border-primary/20 bg-primary/[0.03]">
         <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -135,7 +115,7 @@ export function DashboardPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Time period</CardTitle>
           <p className="text-xs text-muted-foreground font-normal">
-            Filters rows, posters, jobs, OpenAI spend, and the table below. Queue and client totals are always current.
+            Filters rows, jobs, and the table below. Queue and client totals are always current.
           </p>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -221,9 +201,9 @@ export function DashboardPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm text-muted-foreground">Posters generated</CardTitle>
+            <CardTitle className="text-sm text-muted-foreground">Poster rows</CardTitle>
           </CardHeader>
-          <CardContent className="text-3xl font-semibold">{stats.postersGenerated}</CardContent>
+          <CardContent className="text-3xl font-semibold">{stats.posterRows}</CardContent>
         </Card>
         <Card>
           <CardHeader>

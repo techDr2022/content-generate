@@ -1,23 +1,10 @@
 "use client";
 
-import {
-  DEFAULT_POSTER_LOOK_POOL,
-  POSTER_LOOK_IDS,
-  POSTER_LOOK_LABELS,
-  type ClientBrandKit,
-  type PosterLookId,
-} from "@/lib/types";
+import type { ClientBrandKit } from "@/lib/types";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 export type BrandKitFormState = ClientBrandKit;
 
@@ -37,26 +24,14 @@ function patchColors(
   };
 }
 
-function toggleLookInPool(value: BrandKitFormState, look: PosterLookId, checked: boolean): BrandKitFormState {
-  const current = value.posterLookPool ?? [];
-  const next = checked
-    ? current.includes(look)
-      ? current
-      : [...current, look]
-    : current.filter((id) => id !== look);
-  return { ...value, posterLookPool: next.length > 0 ? next : undefined };
-}
-
-const POOL_OPTIONS = POSTER_LOOK_IDS.filter((id) => id !== "text_only" && id !== "custom");
-
 export function BrandKitSection({ value, onChange }: BrandKitSectionProps) {
   return (
     <div className="space-y-6">
       <div className="space-y-3">
         <div>
-          <Label className="text-base">Poster header &amp; footer</Label>
+          <Label className="text-base">Post header &amp; footer templates</Label>
           <p className="mt-1 text-xs text-muted-foreground">
-            Saved templates on every poster. Placeholders:{" "}
+            Saved templates referenced in calendar copy. Placeholders:{" "}
             <span className="font-mono">[Doctor Name]</span>, <span className="font-mono">[Clinic Name]</span>,{" "}
             <span className="font-mono">[City]</span>.
           </p>
@@ -76,7 +51,7 @@ export function BrandKitSection({ value, onChange }: BrandKitSectionProps) {
         </div>
         <div className="space-y-2">
           <Label htmlFor="poster-footer" className="text-xs">
-            Footer template (consistent on all posters)
+            Footer template
           </Label>
           <Textarea
             id="poster-footer"
@@ -94,16 +69,14 @@ export function BrandKitSection({ value, onChange }: BrandKitSectionProps) {
             onCheckedChange={(c) => onChange({ ...value, rotateDoctors: c === true })}
           />
           <span>
-            Rotate doctors across bulk posters — each creative uses the next doctor in the header and in [Doctor Name].
+            Rotate doctors across calendar rows — each row uses the next doctor in the header and in [Doctor Name].
           </span>
         </label>
       </div>
 
       <div className="space-y-2">
         <Label className="text-base">Brand colors</Label>
-        <p className="text-xs text-muted-foreground">
-          Hex colors applied to poster generation and referenced in calendar prompts.
-        </p>
+        <p className="text-xs text-muted-foreground">Hex colors referenced in calendar prompts.</p>
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="space-y-1">
             <Label htmlFor="brand-primary" className="text-xs">
@@ -236,7 +209,7 @@ export function BrandKitSection({ value, onChange }: BrandKitSectionProps) {
           Design guidelines
         </Label>
         <p className="text-xs text-muted-foreground">
-          Logo placement, imagery rules, tone, do/don’t lists — enforced in calendar copy and poster images.
+          Logo placement, imagery rules, tone, do/don’t lists — enforced in calendar copy.
         </p>
         <Textarea
           id="design-guidelines"
@@ -253,64 +226,6 @@ export function BrandKitSection({ value, onChange }: BrandKitSectionProps) {
           />
           Strict mode — model must not deviate from these rules
         </label>
-      </div>
-
-      <div className="space-y-3">
-        <Label className="text-base">Default poster style</Label>
-        <Select
-          value={value.defaultPosterLook ?? "text_only"}
-          onValueChange={(v) => onChange({ ...value, defaultPosterLook: v as PosterLookId })}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {POSTER_LOOK_IDS.map((id) => (
-              <SelectItem key={id} value={id}>
-                {POSTER_LOOK_LABELS[id]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {value.defaultPosterLook === "custom" ? (
-          <Textarea
-            rows={3}
-            maxLength={500}
-            placeholder="Custom poster art direction for this client…"
-            value={value.posterLookCustom ?? ""}
-            onChange={(e) => onChange({ ...value, posterLookCustom: e.target.value.trim() || undefined })}
-          />
-        ) : null}
-
-        <label className="flex items-start gap-2 text-sm">
-          <Checkbox
-            className="mt-0.5"
-            checked={value.rotatePosterStyles ?? false}
-            onCheckedChange={(c) => onChange({ ...value, rotatePosterStyles: c === true })}
-          />
-          <span>
-            Rotate design styles when generating multiple posters — each creative uses a different look from the pool
-            below (or defaults:{" "}
-            {DEFAULT_POSTER_LOOK_POOL.map((id) => POSTER_LOOK_LABELS[id]).join(", ")}).
-          </span>
-        </label>
-
-        {value.rotatePosterStyles ? (
-          <div className="rounded-md border p-3 space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Style pool for rotation</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {POOL_OPTIONS.map((id) => (
-                <label key={id} className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={(value.posterLookPool ?? []).includes(id)}
-                    onCheckedChange={(c) => toggleLookInPool(value, id, c === true)}
-                  />
-                  {POSTER_LOOK_LABELS[id]}
-                </label>
-              ))}
-            </div>
-          </div>
-        ) : null}
       </div>
     </div>
   );

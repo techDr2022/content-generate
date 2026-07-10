@@ -1,13 +1,21 @@
 import { z } from "zod";
-import type { PosterLookId } from "./posterLook";
-import { POSTER_LOOK_IDS } from "./posterLook";
 
 const hexColorSchema = z
   .string()
   .trim()
   .regex(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/, "Use a hex color like #1A2B3C");
 
-const posterLookSchema = z.enum(POSTER_LOOK_IDS as unknown as [PosterLookId, ...PosterLookId[]]);
+/** Legacy poster look values kept for existing brand kit JSON in the database. */
+const legacyPosterLookSchema = z.enum([
+  "text_only",
+  "minimal_clean",
+  "bold_marketing",
+  "soft_medical",
+  "photo_realistic",
+  "flat_illustration",
+  "luxury_elegant",
+  "custom",
+]);
 
 export const clientBrandKitSchema = z
   .object({
@@ -32,30 +40,20 @@ export const clientBrandKitSchema = z
       .optional(),
     designGuidelines: z.string().max(12_000).optional(),
     strictGuidelines: z.boolean().optional(),
-    defaultPosterLook: posterLookSchema.optional(),
+    defaultPosterLook: legacyPosterLookSchema.optional(),
     posterLookCustom: z.string().max(500).optional(),
     rotatePosterStyles: z.boolean().optional(),
-    posterLookPool: z.array(posterLookSchema).max(8).optional(),
+    posterLookPool: z.array(legacyPosterLookSchema).max(8).optional(),
     /** Saved header template; supports [Doctor Name], [Clinic Name], [City]. */
     posterHeader: z.string().max(800).optional(),
     /** Saved footer template (phone, address, etc.); same placeholders. */
     posterFooter: z.string().max(2000).optional(),
-    /** When multiple doctors on the client, rotate featured doctor per bulk poster. */
+    /** When multiple doctors on the client, rotate featured doctor across calendar rows. */
     rotateDoctors: z.boolean().optional(),
   })
   .strict();
 
 export type ClientBrandKit = z.infer<typeof clientBrandKitSchema>;
-
-/** Looks used when bulk rotation is on but the client has no pool configured. */
-export const DEFAULT_POSTER_LOOK_POOL: PosterLookId[] = [
-  "minimal_clean",
-  "bold_marketing",
-  "soft_medical",
-  "photo_realistic",
-  "flat_illustration",
-  "luxury_elegant",
-];
 
 export function emptyBrandKit(): ClientBrandKit {
   return {};
@@ -117,29 +115,4 @@ export function brandKitHasVisualRules(kit: ClientBrandKit | null | undefined): 
       kit.grid?.gutterPx ||
       kit.designGuidelines?.trim()
   );
-}
-
-export function effectivePosterLookPool(kit: ClientBrandKit | null | undefined): PosterLookId[] {
-  const pool = kit?.posterLookPool?.filter((id) => id !== "text_only" && id !== "custom") ?? [];
-  if (pool.length > 0) return pool;
-  return [...DEFAULT_POSTER_LOOK_POOL];
-}
-
-/** Pick a look for bulk index; uses pool rotation when enabled. */
-export function resolvePosterLookForIndex(
-  kit: ClientBrandKit | null | undefined,
-  index: number,
-  fallback: PosterLookId
-): { posterLook: PosterLookId; posterLookCustom?: string } {
-  if (kit?.rotatePosterStyles) {
-    const pool = effectivePosterLookPool(kit);
-    const look = pool[index % pool.length]!;
-    return { posterLook: look };
-  }
-  const look = kit?.defaultPosterLook ?? fallback;
-  if (look === "custom") {
-    const custom = kit?.posterLookCustom?.trim();
-    return { posterLook: "custom", posterLookCustom: custom || undefined };
-  }
-  return { posterLook: look };
 }

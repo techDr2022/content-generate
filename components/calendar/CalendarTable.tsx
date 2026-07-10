@@ -6,27 +6,16 @@ import {
   type ColumnDef,
 } from "@tanstack/react-table";
 import type { CalendarPost } from "@/lib/types";
-import type { RowPosterLook } from "@/lib/posterRowLooks";
-import { isRowPosterLookBlocked } from "@/lib/posterRowLooks";
-import { ImageIcon, Loader2 } from "lucide-react";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
 import type { RegenerateCalendarField } from "@/hooks/useGenerator";
-import { posterRowKey } from "@/hooks/usePosterImageFlow";
 import { CalendarCopyCell } from "./CalendarCopyCell";
-import { PosterLookSelect } from "./PosterLookSelect";
 import { cn } from "@/lib/utils";
 
 interface CalendarTableProps {
   rows: CalendarPost[];
   clientId?: string;
-  onGeneratePoster: (post: CalendarPost, rowIndex: number) => void;
   onRegenerateField: (rowIndex: number, field: RegenerateCalendarField, post: CalendarPost) => void;
-  posterLoadingKey: string | null;
   copyLoadingKey: string | null;
-  posterPending: boolean;
-  rowLooks: Record<number, RowPosterLook>;
-  onRowLookChange: (rowIndex: number, look: RowPosterLook) => void;
 }
 
 function cellClassForColumn(columnId: string): string {
@@ -37,10 +26,6 @@ function cellClassForColumn(columnId: string): string {
     case "department":
     case "style":
       return "max-w-[6.5rem] whitespace-normal break-words text-[11px] sm:max-w-[9rem] sm:text-xs";
-    case "posterLook":
-      return "min-w-[10rem] max-w-[14rem] whitespace-normal";
-    case "posterImage":
-      return "whitespace-nowrap align-top";
     case "date":
     case "code":
     case "type":
@@ -53,13 +38,8 @@ function cellClassForColumn(columnId: string): string {
 export function CalendarTable({
   rows,
   clientId,
-  onGeneratePoster,
   onRegenerateField,
-  posterLoadingKey,
   copyLoadingKey,
-  posterPending,
-  rowLooks,
-  onRowLookChange,
 }: CalendarTableProps) {
   const columns = useMemo<ColumnDef<CalendarPost>[]>(
     () => [
@@ -98,53 +78,8 @@ export function CalendarTable({
           />
         ),
       },
-      {
-        id: "posterLook",
-        header: "Poster look",
-        cell: ({ row }) => {
-          const look = rowLooks[row.index] ?? { posterLook: "text_only", posterLookCustom: "" };
-          return (
-            <PosterLookSelect
-              compact
-              idPrefix={`table-${row.index}-look`}
-              value={look}
-              onChange={(next) => onRowLookChange(row.index, next)}
-            />
-          );
-        },
-      },
-      {
-        id: "posterImage",
-        header: "Poster",
-        cell: ({ row }) => {
-          const key = posterRowKey(row.original, row.index);
-          const busy = posterPending && posterLoadingKey === key;
-          const text = row.original.textInImage?.trim();
-          const look = rowLooks[row.index] ?? { posterLook: "text_only", posterLookCustom: "" };
-          const disabled = !text || busy || isRowPosterLookBlocked(look);
-
-          return (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-1 flex h-9 w-full gap-1.5 sm:w-auto"
-              disabled={disabled}
-              onClick={() => void onGeneratePoster(row.original, row.index)}
-              aria-label={`Generate poster image from text for ${row.original.date}`}
-            >
-              {busy ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <ImageIcon className="h-3.5 w-3.5" aria-hidden />
-              )}
-              {busy ? "…" : "Generate"}
-            </Button>
-          );
-        },
-      },
     ],
-    [clientId, copyLoadingKey, onGeneratePoster, onRegenerateField, onRowLookChange, posterLoadingKey, posterPending, rowLooks]
+    [clientId, copyLoadingKey, onRegenerateField]
   );
 
   const table = useReactTable({
@@ -160,7 +95,7 @@ export function CalendarTable({
         "border-t border-slate-200/80 bg-gradient-to-b from-slate-50/40 to-background dark:border-slate-800/80 dark:from-slate-950/50"
       )}
     >
-      <table className="w-full min-w-[1040px] caption-bottom border-collapse text-sm">
+      <table className="w-full min-w-[720px] caption-bottom border-collapse text-sm">
         <TableHeader className="sticky top-0 z-20 border-b border-slate-200/90 bg-background/95 shadow-sm backdrop-blur-md dark:border-slate-800 dark:bg-background/90">
           {table.getHeaderGroups().map((hg) => (
             <TableRow key={hg.id} className="border-b border-slate-200/80 hover:bg-transparent dark:border-slate-800">

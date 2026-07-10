@@ -22,7 +22,7 @@ export const MAIN_NAV_LINKS: MainNavLink[] = [
   { href: "/clients", label: "Clients", icon: Users },
   { href: "/reviews", label: "Reviews", icon: ClipboardList },
   { href: "/generator", label: "Generator", icon: Sparkles },
-  { href: "/poster-images", label: "Poster images", icon: ImageIcon },
+  { href: "/image-generation", label: "Image Generation", icon: ImageIcon },
   { href: "/bulk-export", label: "Bulk export", icon: Download },
   { href: "/jobs", label: "Job history", icon: History },
   { href: "/settings", label: "Settings", icon: Settings },

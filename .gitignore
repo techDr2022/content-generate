@@ -2,6 +2,8 @@ node_modules
 dist
 build
 .next
+.npm-cache
+recycle
 *.tsbuildinfo
 .env
 .env.local
@@ -12,3 +14,6 @@ uploads
 client/dist
 server/dist
 shared/dist
+.vercel
+.env*
+.neon

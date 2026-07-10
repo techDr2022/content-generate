@@ -2,14 +2,7 @@ import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type ApiResponse } from "@/lib/api";
 import { ENQUEUE_TIMEOUT_MS, postEnqueueWithRetry } from "@/lib/enqueueRetry";
-import type {
-  CalendarPost,
-  ClientBrandKit,
-  GenerationJobDTO,
-  PosterBrandAssetsPayload,
-  PosterImageOutputOptions,
-  PosterLookId,
-} from "@/lib/types";
+import type { CalendarPost, GenerationJobDTO } from "@/lib/types";
 
 export interface GeneratePayload {
   clientId: string;
@@ -122,59 +115,6 @@ export function useJobCalendarRows(jobId: string | undefined) {
   });
 }
 
-export interface GeneratePosterImagePayload extends PosterImageOutputOptions, PosterBrandAssetsPayload {
-  textInImage: string;
-  posterLook: PosterLookId;
-  posterLookCustom?: string;
-  brandKit?: ClientBrandKit | null;
-  contentStyle?: string;
-  featuredDoctor?: string;
-  clinicName?: string;
-  city?: string;
-  generationNotes?: string;
-}
-
-export interface RefinePosterImagePayload extends PosterImageOutputOptions {
-  imageBase64: string;
-  imageMimeType: string;
-  editInstruction: string;
-  brandKit?: ClientBrandKit | null;
-}
-
-export interface GeneratePosterImageResult {
-  imageBase64: string;
-  mimeType: string;
-  revisedPrompt?: string;
-  /** Estimated OpenAI charge for this image (USD). */
-  costUsd?: number;
-}
-
-export function useRefinePosterImage() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (payload: RefinePosterImagePayload) => {
-      try {
-        const res = await api.post<ApiResponse<GeneratePosterImageResult>>("/api/images/refine", payload, {
-          timeout: 180_000,
-        });
-        if (!res.data.success || !res.data.data) {
-          throw new Error(res.data.error ?? "Image refine failed");
-        }
-        return res.data.data;
-      } catch (err) {
-        if (axios.isAxiosError(err)) {
-          const data = err.response?.data as { error?: string } | undefined;
-          if (data?.error) throw new Error(data.error);
-        }
-        throw err instanceof Error ? err : new Error(String(err));
-      }
-    },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["openai-credits"] });
-    },
-  });
-}
-
 export type RegenerateCalendarField = "textInImage" | "supportingText";
 
 export interface RegenerateCalendarFieldPayload {
@@ -208,14 +148,47 @@ export function useRegenerateCalendarField() {
   });
 }
 
+export interface GeneratePosterImagePayload {
+  textInImage: string;
+  posterLook: import("@/lib/types").PosterLookId;
+  posterLookCustom?: string;
+  styleVariation?: import("@/lib/types").PosterStyleVariationId;
+  styleVariationIndex?: number;
+  improveCopy?: boolean;
+  imageSize?: import("@/lib/types").PosterImageSizeId;
+  imageQuality?: import("@/lib/types").PosterImageQualityId;
+  outputFormat?: import("@/lib/types").PosterImageFormatId;
+  outputCompression?: number;
+  background?: import("@/lib/types").PosterImageBackgroundId;
+  contactDetails?: string;
+  logoBase64?: string;
+  logoMimeType?: string;
+  doctorPhotoBase64?: string;
+  doctorPhotoMimeType?: string;
+  brandKit?: import("@/lib/types").ClientBrandKit | null;
+  contentStyle?: string;
+  featuredDoctor?: string;
+  clinicName?: string;
+  city?: string;
+  generationNotes?: string;
+}
+
+export interface PosterImageResponse {
+  imageBase64: string;
+  mimeType: string;
+  revisedPrompt?: string;
+  costUsd?: number;
+}
+
 export function useGeneratePosterImage() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: GeneratePosterImagePayload) => {
       try {
-        const res = await api.post<ApiResponse<GeneratePosterImageResult>>("/api/images/generate", payload, {
-          timeout: 180_000,
-        });
+        const res = await api.post<ApiResponse<PosterImageResponse>>(
+          "/api/images/generate",
+          payload,
+          { timeout: 180_000 }
+        );
         if (!res.data.success || !res.data.data) {
           throw new Error(res.data.error ?? "Image generation failed");
         }
@@ -228,8 +201,42 @@ export function useGeneratePosterImage() {
         throw err instanceof Error ? err : new Error(String(err));
       }
     },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["openai-credits"] });
+  });
+}
+
+export interface RefinePosterImagePayload {
+  imageBase64: string;
+  imageMimeType: string;
+  editInstruction: string;
+  brandKit?: import("@/lib/types").ClientBrandKit | null;
+  imageSize?: import("@/lib/types").PosterImageSizeId;
+  imageQuality?: import("@/lib/types").PosterImageQualityId;
+  outputFormat?: import("@/lib/types").PosterImageFormatId;
+  outputCompression?: number;
+  background?: import("@/lib/types").PosterImageBackgroundId;
+}
+
+export function useRefinePosterImage() {
+  return useMutation({
+    mutationFn: async (payload: RefinePosterImagePayload) => {
+      try {
+        const res = await api.post<ApiResponse<PosterImageResponse>>(
+          "/api/images/refine",
+          payload,
+          { timeout: 180_000 }
+        );
+        if (!res.data.success || !res.data.data) {
+          throw new Error(res.data.error ?? "Image refine failed");
+        }
+        return res.data.data;
+      } catch (err) {
+        if (axios.isAxiosError(err)) {
+          const data = err.response?.data as { error?: string } | undefined;
+          if (data?.error) throw new Error(data.error);
+        }
+        throw err instanceof Error ? err : new Error(String(err));
+      }
     },
   });
 }
+

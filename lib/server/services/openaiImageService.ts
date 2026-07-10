@@ -12,7 +12,13 @@ import type {
 } from "@/lib/types";
 import { POSTER_LOOK_HINTS } from "@/lib/types";
 import { buildPosterLayoutForPrompt } from "@/lib/posterLayout";
-import { formatBrandKitForImagePrompt } from "./brandKitPrompt";
+import { formatBrandKitForImagePrompt } from "@/lib/server/services/brandKitPrompt";
+import {
+  HEALTHCARE_POSTER_SAFETY,
+  POSTER_DESIGN_SYSTEM_PROMPT,
+} from "@/lib/server/services/posterDesignSystemPrompt";
+import { resolvePosterStyleHint } from "@/lib/types/posterStyleVariation";
+import type { PosterStyleVariationId } from "@/lib/types/posterStyleVariation";
 import { logger } from "../logger";
 import {
   estimateOpenAiImageCostUsd,
@@ -41,8 +47,7 @@ const MAX_PROMPT_CHARS = 4000;
 /** GPT image `images.edit` prompt budget */
 const MAX_EDIT_PROMPT_CHARS = 32000;
 
-/** Applied to every generation so posters stay appropriate for healthcare brands. */
-const HEALTHCARE_POSTER_BASELINE = `Professional healthcare marketing poster for hospitals, clinics, or medical practices: trustworthy, dignified, patient-appropriate visuals. Educational and inviting tone; avoid graphic anatomy, gore, sensationalism, fear-based messaging, or implied guarantees of outcomes.`;
+const POSTER_BASELINE = `${POSTER_DESIGN_SYSTEM_PROMPT}\n\n${HEALTHCARE_POSTER_SAFETY}`;
 
 function resolveLookHint(posterLook: PosterLookId, posterLookCustom?: string): string {
   if (posterLook === "custom") {
@@ -63,6 +68,9 @@ export function buildPosterImagePrompt(input: {
   brandKit?: ClientBrandKit | null;
   /** Calendar content style (e.g. Myth vs Fact) — hints layout variety. */
   contentStyle?: string;
+  styleVariation?: PosterStyleVariationId;
+  styleVariationIndex?: number;
+  improveCopy?: boolean;
   /** Resolved header block (doctor / clinic line). */
   headerBlock?: string;
   /** Resolved footer block (contact, address). */
@@ -76,18 +84,31 @@ export function buildPosterImagePrompt(input: {
   const genNotes = input.generationNotes?.trim();
   const body = input.textInImage.trim();
   const contact = input.contactDetails?.trim();
-  const styleHint = input.contentStyle?.trim();
+  const contentFormatHint = input.contentStyle?.trim();
   const sep = "\n\n";
 
-  const segments: string[] = [HEALTHCARE_POSTER_BASELINE];
+  const segments: string[] = [POSTER_BASELINE];
   if (brandBlock) segments.push(brandBlock);
   if (genNotes) {
     segments.push(`CLIENT GENERATION NOTES (follow for this poster):\n${genNotes}`);
   }
-  if (hint) segments.push(hint);
-  if (styleHint) {
+  if (input.improveCopy) {
     segments.push(
-      `Content format: "${styleHint}" — choose a layout that fits this format (e.g. split panels for Myth vs Fact, checklist for Dos & Don'ts).`
+      "IMPROVE COPY: enabled — you may lightly polish wording for clarity and impact while preserving meaning."
+    );
+  } else {
+    segments.push(
+      "IMPROVE COPY: disabled — render the user's text exactly; do not rewrite headlines, body, CTA, or disclaimer."
+    );
+  }
+  const variationHint = resolvePosterStyleHint(input.styleVariation, input.styleVariationIndex ?? 0);
+  if (variationHint) {
+    segments.push(`STYLE DIRECTION:\n${variationHint}`);
+  }
+  if (hint) segments.push(hint);
+  if (contentFormatHint) {
+    segments.push(
+      `Content format: "${contentFormatHint}" — choose a layout that fits this format (e.g. split panels for Myth vs Fact, checklist for Dos & Don'ts).`
     );
   }
 
@@ -117,7 +138,7 @@ export function buildPosterImagePrompt(input: {
   let combined = segments.join(sep);
   if (combined.length <= MAX_PROMPT_CHARS) return combined;
 
-  const baselineLen = HEALTHCARE_POSTER_BASELINE.length;
+  const baselineLen = POSTER_BASELINE.length;
   const sepLen = sep.length;
 
   let hintPart = hint;
@@ -131,7 +152,7 @@ export function buildPosterImagePrompt(input: {
       hintPart.length > 80
     ) {
       hintPart = `${hintPart.slice(0, Math.floor(hintPart.length * 0.85))}…`;
-      combined = [HEALTHCARE_POSTER_BASELINE, hintPart, bodyPart, contactPart ? contactPart : ""]
+      combined = [POSTER_BASELINE, hintPart, bodyPart, contactPart ? contactPart : ""]
         .filter(Boolean)
         .join(sep);
     }
@@ -141,8 +162,8 @@ export function buildPosterImagePrompt(input: {
     while (combined.length > MAX_PROMPT_CHARS && contactPart.length > 60) {
       contactPart = `${contactPart.slice(0, Math.floor(contactPart.length * 0.88))}…`;
       combined = hintPart
-        ? [HEALTHCARE_POSTER_BASELINE, hintPart, bodyPart, contactPart].join(sep)
-        : [HEALTHCARE_POSTER_BASELINE, bodyPart, contactPart].join(sep);
+        ? [POSTER_BASELINE, hintPart, bodyPart, contactPart].join(sep)
+        : [POSTER_BASELINE, bodyPart, contactPart].join(sep);
     }
   }
 
@@ -160,8 +181,8 @@ export function buildPosterImagePrompt(input: {
   }
 
   combined = hintPart
-    ? [HEALTHCARE_POSTER_BASELINE, hintPart, bodyPart, contactPart].filter(Boolean).join(sep)
-    : [HEALTHCARE_POSTER_BASELINE, bodyPart, contactPart].filter(Boolean).join(sep);
+    ? [POSTER_BASELINE, hintPart, bodyPart, contactPart].filter(Boolean).join(sep)
+    : [POSTER_BASELINE, bodyPart, contactPart].filter(Boolean).join(sep);
 
   return combined.slice(0, MAX_PROMPT_CHARS);
 }
@@ -329,6 +350,9 @@ export type PosterGenerateInput = {
   clinicName?: string;
   city?: string;
   generationNotes?: string;
+  styleVariation?: PosterStyleVariationId;
+  styleVariationIndex?: number;
+  improveCopy?: boolean;
 } & PosterImageOutputOptions &
   PosterBrandAssetsPayload;
 
@@ -396,6 +420,9 @@ export async function generatePosterImageFromText(
     posterLookCustom: input.posterLookCustom,
     brandKit: input.brandKit,
     contentStyle: input.contentStyle,
+    styleVariation: input.styleVariation,
+    styleVariationIndex: input.styleVariationIndex,
+    improveCopy: input.improveCopy,
     headerBlock: layout.headerBlock,
     footerBlock: layout.footerBlock,
     featuredDoctor: input.featuredDoctor,

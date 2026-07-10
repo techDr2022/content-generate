@@ -14,7 +14,9 @@ import {
   POSTER_IMAGE_QUALITY_IDS,
   POSTER_IMAGE_SIZE_IDS,
   POSTER_LOOK_IDS,
+  POSTER_STYLE_VARIATION_IDS,
 } from "@/lib/types";
+import type { PosterStyleVariationId } from "@/lib/types";
 import { HttpError } from "@/lib/server/http";
 import { assertPosterBrandAssetsValid } from "@/lib/server/posterBrandAssetsValidate";
 import {
@@ -38,11 +40,18 @@ const posterImageBackgroundSchema = z.enum(
   POSTER_IMAGE_BACKGROUND_IDS as unknown as [PosterImageBackgroundId, ...PosterImageBackgroundId[]]
 );
 
+const posterStyleVariationSchema = z.enum(
+  POSTER_STYLE_VARIATION_IDS as unknown as [PosterStyleVariationId, ...PosterStyleVariationId[]]
+);
+
 const generateBodySchema = z
   .object({
     textInImage: z.string().min(1, "textInImage is required").max(12000),
     posterLook: posterLookSchema,
     posterLookCustom: z.string().max(500).optional(),
+    styleVariation: posterStyleVariationSchema.optional(),
+    styleVariationIndex: z.number().int().min(0).max(10_000).optional(),
+    improveCopy: z.boolean().optional(),
     imageSize: posterImageSizeSchema.optional(),
     imageQuality: posterImageQualitySchema.optional(),
     outputFormat: posterImageFormatSchema.optional(),
@@ -118,6 +127,11 @@ export async function generateImageFromCalendarText(body: unknown, userId?: stri
       ...(parsed.data.generationNotes?.trim()
         ? { generationNotes: parsed.data.generationNotes.trim() }
         : {}),
+      ...(parsed.data.styleVariation ? { styleVariation: parsed.data.styleVariation } : {}),
+      ...(parsed.data.styleVariationIndex !== undefined
+        ? { styleVariationIndex: parsed.data.styleVariationIndex }
+        : {}),
+      ...(parsed.data.improveCopy ? { improveCopy: true } : {}),
       ...brandFields,
     });
     void recordOpenAiImageUsage({
