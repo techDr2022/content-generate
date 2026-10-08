@@ -86,7 +86,7 @@ async function uploadToS3(jobId: string, workbookBuffer: Buffer): Promise<string
       "Set AWS_BUCKET_NAME to your real R2 bucket name (not a placeholder). Or use STORAGE_TYPE=LOCAL."
     );
   }
-  const key = `exports/${jobId}.xlsx`;
+  const key = workbookObjectKey(jobId);
   const client = getS3Client();
   await client.send(
     new PutObjectCommand({
@@ -110,6 +110,30 @@ export function getLocalWorkbookPath(jobId: string): string {
   return path.join(getUploadsRoot(), `${jobId}.xlsx`);
 }
 
+/** Stable object key written by `uploadToS3`. Independent of the expiring signed URL stored on the job. */
+export function workbookObjectKey(jobId: string): string {
+  return `exports/${jobId}.xlsx`;
+}
+
+async function readWorkbookFromS3(jobId: string): Promise<Buffer> {
+  assertS3CredentialsReady();
+  const bucket = process.env.AWS_BUCKET_NAME?.trim();
+  if (!bucket) {
+    throw new HttpError(500, "AWS_BUCKET_NAME is not set");
+  }
+  const out = await getS3Client().send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: workbookObjectKey(jobId),
+    })
+  );
+  const bytes = await out.Body?.transformToByteArray();
+  if (!bytes?.byteLength) {
+    throw new HttpError(404, "Workbook missing in storage");
+  }
+  return Buffer.from(bytes);
+}
+
 function isSameOriginApiDownloadUrl(fileUrl: string): boolean {
   try {
     const u = new URL(fileUrl);
@@ -131,6 +155,18 @@ export async function loadWorkbookBufferForJob(job: {
 
   if (fs.existsSync(localPath)) {
     return fs.promises.readFile(localPath);
+  }
+
+  if (storage === "S3") {
+    try {
+      return await readWorkbookFromS3(job.id);
+    } catch (err) {
+      if (err instanceof HttpError && err.status === 404) {
+        /* fall through to the stored URL */
+      } else if (!job.fileUrl?.trim()) {
+        throw err;
+      }
+    }
   }
 
   const url = job.fileUrl?.trim() ?? "";

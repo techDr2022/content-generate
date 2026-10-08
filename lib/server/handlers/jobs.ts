@@ -1,4 +1,3 @@
-import fs from "fs";
 import ExcelJS from "exceljs";
 import { Job } from "bullmq";
 import { z } from "zod";
@@ -9,7 +8,7 @@ import { prisma } from "@/lib/server/prisma";
 import { HttpError } from "@/lib/server/http";
 import { addSseConnection, emitJobProgress, removeSseConnection } from "@/lib/server/services/sseHub";
 import { getContentQueue } from "@/lib/server/services/jobQueue";
-import { getLocalWorkbookPath, loadWorkbookBufferForJob } from "@/lib/server/services/storageService";
+import { loadWorkbookBufferForJob } from "@/lib/server/services/storageService";
 import { generationJobRowToPayload } from "@/lib/server/services/generationRunner";
 
 export async function listJobs(userId: string) {
@@ -270,21 +269,13 @@ export async function downloadJobFile(userId: string, jobId: string): Promise<Re
     throw new HttpError(404, "File not available");
   }
 
-  const storage = process.env.STORAGE_TYPE ?? "LOCAL";
-  if (storage === "S3" && job.fileUrl.startsWith("http")) {
-    return Response.redirect(job.fileUrl, 302);
-  }
-
-  const path = getLocalWorkbookPath(job.id);
-  if (!fs.existsSync(path)) {
-    throw new HttpError(404, "File missing on disk");
-  }
-  const buf = await fs.promises.readFile(path);
+  const buf = await loadWorkbookBufferForJob({ id: job.id, fileUrl: job.fileUrl });
   const filename = `calendar-${job.clientId}-${job.year}-${job.month}.xlsx`;
-  return new Response(buf, {
+  return new Response(new Uint8Array(buf), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Length": String(buf.byteLength),
     },
   });
 }
