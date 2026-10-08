@@ -42,10 +42,9 @@ export type PosterImageResult = {
   usage: PosterImageUsage;
 };
 
-/** DALL·E 3 prompt max length */
-const MAX_PROMPT_CHARS = 4000;
-/** GPT image `images.edit` prompt budget */
-const MAX_EDIT_PROMPT_CHARS = 32000;
+/** DALL·E 3 prompt max. GPT image models accept 32,000. */
+const DALLE_PROMPT_CHARS = 4000;
+const GPT_PROMPT_CHARS = 32000;
 
 const POSTER_BASELINE = `${POSTER_DESIGN_SYSTEM_PROMPT}\n\n${HEALTHCARE_POSTER_SAFETY}`;
 
@@ -57,8 +56,8 @@ function resolveLookHint(posterLook: PosterLookId, posterLookCustom?: string): s
 }
 
 /**
- * Image prompt = healthcare baseline + optional look hint + calendar **text in image** copy
- * (+ optional contact lines for typography on the poster).
+ * Selected copy is placed first so a length cap cannot drop it.
+ * Design rules follow and are shortened first if the prompt must be trimmed.
  */
 export function buildPosterImagePrompt(input: {
   textInImage: string;
@@ -78,6 +77,7 @@ export function buildPosterImagePrompt(input: {
   /** Featured doctor for this poster (portrait / header attribution). */
   featuredDoctor?: string;
   generationNotes?: string;
+  maxChars?: number;
 }): string {
   const hint = resolveLookHint(input.posterLook, input.posterLookCustom);
   const brandBlock = formatBrandKitForImagePrompt(input.brandKit);
@@ -86,105 +86,58 @@ export function buildPosterImagePrompt(input: {
   const contact = input.contactDetails?.trim();
   const contentFormatHint = input.contentStyle?.trim();
   const sep = "\n\n";
-
-  const segments: string[] = [POSTER_BASELINE];
-  if (brandBlock) segments.push(brandBlock);
-  if (genNotes) {
-    segments.push(`CLIENT GENERATION NOTES (follow for this poster):\n${genNotes}`);
-  }
-  if (input.improveCopy) {
-    segments.push(
-      "IMPROVE COPY: enabled — you may lightly polish wording for clarity and impact while preserving meaning."
-    );
-  } else {
-    segments.push(
-      "IMPROVE COPY: disabled — render the user's text exactly; do not rewrite headlines, body, CTA, or disclaimer."
-    );
-  }
-  const variationHint = resolvePosterStyleHint(input.styleVariation, input.styleVariationIndex ?? 0);
-  if (variationHint) {
-    segments.push(`STYLE DIRECTION:\n${variationHint}`);
-  }
-  if (hint) segments.push(hint);
-  if (contentFormatHint) {
-    segments.push(
-      `Content format: "${contentFormatHint}" — choose a layout that fits this format (e.g. split panels for Myth vs Fact, checklist for Dos & Don'ts).`
-    );
-  }
-
   const header = input.headerBlock?.trim();
   const footer = input.footerBlock?.trim() ?? contact;
   const doctor = input.featuredDoctor?.trim();
+  const maxChars = input.maxChars ?? GPT_PROMPT_CHARS;
+  const variationHint = resolvePosterStyleHint(input.styleVariation, input.styleVariationIndex ?? 0);
 
+  const copyParts = [
+    "SELECTED POSTER COPY — this is the only text and topic for the poster.",
+    "Render this wording exactly. Do not invent a different headline, offer, diagnosis, or story.",
+    "Illustrate only what this copy describes. Keep it dignified and patient-appropriate: no gore, graphic anatomy, fear imagery, sexual content, or unrelated scenes.",
+    `MAIN CONTENT:\n${body}`,
+  ];
   if (header || doctor) {
-    const headerLines = [
-      "POSTER HEADER (top area — clear hierarchy, readable typography):",
-      ...(header ? [header] : []),
-      ...(doctor && !header?.includes(doctor)
-        ? [`Feature this doctor prominently in the header or portrait area: ${doctor}`]
-        : []),
-    ];
-    segments.push(headerLines.join("\n"));
-  }
-
-  segments.push(`MAIN CONTENT (center — render this text faithfully):\n${body}`);
-
-  if (footer) {
-    segments.push(
-      `POSTER FOOTER (bottom — consistent on every creative; preserve wording):\n${footer}`
+    copyParts.push(
+      [
+        "POSTER HEADER:",
+        ...(header ? [header] : []),
+        ...(doctor && !header?.includes(doctor) ? [`Feature this doctor: ${doctor}`] : []),
+      ].join("\n")
     );
   }
-
-  let combined = segments.join(sep);
-  if (combined.length <= MAX_PROMPT_CHARS) return combined;
-
-  const baselineLen = POSTER_BASELINE.length;
-  const sepLen = sep.length;
-
-  let hintPart = hint;
-  let bodyPart = body;
-  let contactPart = footer ?? "";
-  const headerPart = header ?? "";
-
-  if (hintPart) {
-    while (
-      combined.length > MAX_PROMPT_CHARS &&
-      hintPart.length > 80
-    ) {
-      hintPart = `${hintPart.slice(0, Math.floor(hintPart.length * 0.85))}…`;
-      combined = [POSTER_BASELINE, hintPart, bodyPart, contactPart ? contactPart : ""]
-        .filter(Boolean)
-        .join(sep);
-    }
+  if (footer) {
+    copyParts.push(`POSTER FOOTER:\n${footer}`);
   }
+  const copyBlock = copyParts.join(sep);
 
-  if (contactPart) {
-    while (combined.length > MAX_PROMPT_CHARS && contactPart.length > 60) {
-      contactPart = `${contactPart.slice(0, Math.floor(contactPart.length * 0.88))}…`;
-      combined = hintPart
-        ? [POSTER_BASELINE, hintPart, bodyPart, contactPart].join(sep)
-        : [POSTER_BASELINE, bodyPart, contactPart].join(sep);
-    }
+  const instructionParts: string[] = [];
+  if (brandBlock) instructionParts.push(brandBlock);
+  if (genNotes) {
+    instructionParts.push(`CLIENT GENERATION NOTES (follow for this poster):\n${genNotes}`);
   }
-
-  const overhead =
-    baselineLen +
-    sepLen +
-    (hintPart ? hintPart.length + sepLen : 0) +
-    (headerPart ? headerPart.length + sepLen + 40 : 0) +
-    (contactPart ? contactPart.length + sepLen + 40 : 0);
-  let bodyBudget = MAX_PROMPT_CHARS - overhead;
-  if (bodyBudget < 40) bodyBudget = 40;
-
-  if (bodyPart.length > bodyBudget) {
-    bodyPart = `${bodyPart.slice(0, Math.max(0, bodyBudget - 1))}…`;
+  instructionParts.push(
+    input.improveCopy
+      ? "IMPROVE COPY: enabled — you may lightly polish wording for clarity and impact while preserving meaning."
+      : "IMPROVE COPY: disabled — render the user's text exactly; do not rewrite headlines, body, CTA, or disclaimer."
+  );
+  if (variationHint) instructionParts.push(`STYLE DIRECTION:\n${variationHint}`);
+  if (hint) instructionParts.push(hint);
+  if (contentFormatHint) {
+    instructionParts.push(
+      `Content format: "${contentFormatHint}" — layout should match this format (e.g. split panels for Myth vs Fact, checklist for Dos & Don'ts).`
+    );
   }
+  instructionParts.push(POSTER_BASELINE);
+  const instructions = instructionParts.filter(Boolean).join(sep);
 
-  combined = hintPart
-    ? [POSTER_BASELINE, hintPart, bodyPart, contactPart].filter(Boolean).join(sep)
-    : [POSTER_BASELINE, bodyPart, contactPart].filter(Boolean).join(sep);
+  const combined = `${copyBlock}${sep}${instructions}`;
+  if (combined.length <= maxChars) return combined;
 
-  return combined.slice(0, MAX_PROMPT_CHARS);
+  const roomForInstructions = maxChars - copyBlock.length - sep.length;
+  if (roomForInstructions < 240) return copyBlock.slice(0, maxChars);
+  return `${copyBlock}${sep}${instructions.slice(0, roomForInstructions)}`;
 }
 
 function imageModel(): string {
@@ -252,6 +205,10 @@ function resolveDalleStylePosterSize(requested?: PosterImageSizeId): PresetPoste
 
 function isDalleImageModel(model: string): boolean {
   return /^dall-e-/i.test(model.trim());
+}
+
+function promptCharLimit(model: string): number {
+  return isDalleImageModel(model) ? DALLE_PROMPT_CHARS : GPT_PROMPT_CHARS;
 }
 
 function effectiveGenerateSize(model: string, requested: PresetPosterSize | string): string {
@@ -343,8 +300,8 @@ Follow all creative direction in the prompt below.
 `;
   }
   const combined = pre + posterPrompt;
-  if (combined.length <= MAX_EDIT_PROMPT_CHARS) return combined;
-  return `${combined.slice(0, MAX_EDIT_PROMPT_CHARS - 1)}…`;
+  if (combined.length <= GPT_PROMPT_CHARS) return combined;
+  return `${combined.slice(0, GPT_PROMPT_CHARS - 1)}…`;
 }
 
 export type PosterGenerateInput = {
@@ -421,6 +378,7 @@ export async function generatePosterImageFromText(
     extraContactDetails: contact,
   });
 
+  const modelForPrompt = hasRefs ? imageEditModel() : imageModel();
   const posterPrompt = buildPosterImagePrompt({
     textInImage: input.textInImage,
     posterLook: input.posterLook,
@@ -434,6 +392,7 @@ export async function generatePosterImageFromText(
     footerBlock: layout.footerBlock,
     featuredDoctor: input.featuredDoctor,
     generationNotes: input.generationNotes,
+    maxChars: promptCharLimit(modelForPrompt),
   });
 
   if (hasRefs) {
@@ -458,6 +417,7 @@ export async function generatePosterImageFromText(
     sizeRequested,
     sizeEffective: size,
     promptChars: posterPrompt.length,
+    contentChars: input.textInImage.trim().length,
     quality,
     outputFormat: dalle ? undefined : outputFormat,
     outputCompression: dalle || outputFormat === "png" ? undefined : compression,
@@ -626,8 +586,8 @@ Preserve all text that was not mentioned in the change request. Keep the poster 
     prompt += `\n\n${brandBlock}`;
   }
 
-  if (prompt.length > MAX_EDIT_PROMPT_CHARS) {
-    prompt = `${prompt.slice(0, MAX_EDIT_PROMPT_CHARS - 1)}…`;
+  if (prompt.length > GPT_PROMPT_CHARS) {
+    prompt = `${prompt.slice(0, GPT_PROMPT_CHARS - 1)}…`;
   }
 
   const inputFidelity = resolveInputFidelity(editModel, input.imageQuality);
