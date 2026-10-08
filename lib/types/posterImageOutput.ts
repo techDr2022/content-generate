@@ -1,7 +1,7 @@
 import type { PosterImageSizeId } from "./posterImageSize";
 
-/** OpenAI GPT image models: `auto` lets the API pick. */
-export const POSTER_IMAGE_QUALITY_IDS = ["auto", "low", "medium", "high"] as const;
+/** GPT Image 2.5: `auto` lets the API pick. `xhigh` and `max` are Sunburst / Flare only. */
+export const POSTER_IMAGE_QUALITY_IDS = ["auto", "low", "medium", "high", "xhigh", "max"] as const;
 export type PosterImageQualityId = (typeof POSTER_IMAGE_QUALITY_IDS)[number];
 
 export const POSTER_IMAGE_QUALITY_LABELS: Record<PosterImageQualityId, string> = {
@@ -9,6 +9,8 @@ export const POSTER_IMAGE_QUALITY_LABELS: Record<PosterImageQualityId, string> =
   low: "Low",
   medium: "Medium",
   high: "High",
+  xhigh: "Extra high",
+  max: "Max",
 };
 
 /** Returned bytes format for GPT image models (`output_format`). DALL·E always returns PNG in our flow. */

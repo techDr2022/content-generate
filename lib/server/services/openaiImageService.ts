@@ -190,13 +190,13 @@ export function buildPosterImagePrompt(input: {
 function imageModel(): string {
   const raw = process.env.OPENAI_IMAGE_MODEL?.trim();
   if (raw) return raw;
-  return "dall-e-3";
+  return "gpt-image-2.5-sunburst";
 }
 
 /**
  * When using reference images, `images.edit` requires a GPT image model (not DALL·E 3).
- * `input_fidelity` is only valid on some of those models (e.g. gpt-image-1 / 1.5); gpt-image-1-mini and
- * gpt-image-2 return 400 if it is sent.
+ * `input_fidelity` is only valid on gpt-image-1 / 1.5. gpt-image-1-mini, gpt-image-2, and
+ * gpt-image-2.5 reject it (2 and 2.5 already edit at high fidelity).
  */
 function supportsInputFidelityParameter(model: string): boolean {
   const m = model.trim().toLowerCase();
@@ -206,12 +206,17 @@ function supportsInputFidelityParameter(model: string): boolean {
   return m.startsWith("gpt-image-1");
 }
 
+/** `xhigh` and `max` exist on GPT Image 2.5 (Sunburst / Flare) only. */
+function supportsExtendedQuality(model: string): boolean {
+  return /^gpt-image-2\.5/i.test(model.trim());
+}
+
 function imageEditModel(): string {
   const primary = process.env.OPENAI_IMAGE_MODEL?.trim() ?? "";
   if (primary && /^gpt-image-/i.test(primary)) return primary;
   const edit = process.env.OPENAI_IMAGE_EDIT_MODEL?.trim();
   if (edit) return edit;
-  return "gpt-image-1.5";
+  return "gpt-image-2.5-sunburst";
 }
 
 /** High input fidelity is slow; only use when the user explicitly asks for high quality. */
@@ -269,24 +274,26 @@ function effectiveGenerateSize(model: string, requested: PresetPosterSize | stri
   }
 }
 
-function mapQualityForOpenAI(
-  model: string,
-  q?: PosterImageQualityId
-): "standard" | "hd" | "low" | "medium" | "high" | "auto" {
+type OpenAiImageQuality = "standard" | "hd" | "low" | "medium" | "high" | "xhigh" | "max" | "auto";
+
+function mapQualityForOpenAI(model: string, q?: PosterImageQualityId): OpenAiImageQuality {
   const chosen = q ?? "auto";
   if (isDalleImageModel(model)) {
     if (/^dall-e-3$/i.test(model.trim())) {
-      return chosen === "high" ? "hd" : "standard";
+      return chosen === "high" || chosen === "xhigh" || chosen === "max" ? "hd" : "standard";
     }
     return "standard";
+  }
+  if (!supportsExtendedQuality(model) && (chosen === "xhigh" || chosen === "max")) {
+    return "high";
   }
   return chosen;
 }
 
-function mapGptQualityForEdit(q?: PosterImageQualityId): "auto" | "low" | "medium" | "high" {
-  const v = q ?? "auto";
-  if (v === "low" || v === "medium" || v === "high" || v === "auto") return v;
-  return "auto";
+function mapGptQualityForEdit(model: string, q?: PosterImageQualityId): OpenAiImageQuality {
+  const mapped = mapQualityForOpenAI(model, q);
+  if (mapped === "hd" || mapped === "standard") return "high";
+  return mapped;
 }
 
 function mimeFromOutputFormat(out: { output_format?: string | null }, fallback: PosterImageFormatId | "png"): string {
@@ -462,7 +469,8 @@ export async function generatePosterImageFromText(
     prompt: posterPrompt,
     n: 1,
     size: size as "1024x1024" | "1024x1792" | "1792x1024" | "1024x1536" | "1536x1024",
-    quality,
+    // Installed SDK types predate GPT Image 2.5 `xhigh` / `max`; the string is still sent.
+    quality: quality as "standard" | "hd" | "low" | "medium" | "high" | "auto",
   };
 
   const response = await client.images.generate(
@@ -512,7 +520,7 @@ async function generatePosterWithReferenceImages(
     typeof input.outputCompression === "number" && !Number.isNaN(input.outputCompression)
       ? Math.min(100, Math.max(0, Math.round(input.outputCompression)))
       : 100;
-  const editQuality = mapGptQualityForEdit(input.imageQuality);
+  const editQuality = mapGptQualityForEdit(editModel, input.imageQuality);
 
   const filePromises: Promise<Awaited<ReturnType<typeof toFile>>>[] = [];
   if (hasLogo && input.logoBase64 && input.logoMimeType) {
@@ -552,7 +560,7 @@ async function generatePosterWithReferenceImages(
     prompt,
     n: 1,
     size: size as "1024x1024" | "1024x1536" | "1536x1024",
-    quality: editQuality,
+    quality: editQuality as "low" | "medium" | "high" | "auto",
     output_format: outputFormat,
     background,
     ...(outputFormat === "jpeg" || outputFormat === "webp" ? { output_compression: compression } : {}),
@@ -598,7 +606,7 @@ export async function refinePosterImage(
     typeof input.outputCompression === "number" && !Number.isNaN(input.outputCompression)
       ? Math.min(100, Math.max(0, Math.round(input.outputCompression)))
       : 100;
-  const editQuality = mapGptQualityForEdit(input.imageQuality);
+  const editQuality = mapGptQualityForEdit(editModel, input.imageQuality);
   const brandBlock = formatBrandKitForImagePrompt(input.brandKit);
 
   const file = await referenceImageFile(
@@ -638,7 +646,7 @@ Preserve all text that was not mentioned in the change request. Keep the poster 
     prompt,
     n: 1,
     size: size as "1024x1024" | "1024x1536" | "1536x1024",
-    quality: editQuality,
+    quality: editQuality as "low" | "medium" | "high" | "auto",
     output_format: outputFormat,
     background,
     ...(outputFormat === "jpeg" || outputFormat === "webp" ? { output_compression: compression } : {}),

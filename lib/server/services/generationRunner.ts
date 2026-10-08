@@ -18,7 +18,10 @@ import { enforceCalendarTypeCounts } from "./calendarTypeCounts";
 import { buildExcel } from "./excelBuilder";
 import { persistWorkbookForJob } from "./storageService";
 import { syncCalendarPostsFromJob } from "./reviewCalendarSync";
-import { fetchTopicHistoryLastSixMonths } from "./topicTracker";
+import {
+  fetchGlobalTopicHistoryLastSixMonths,
+  fetchTopicHistoryLastSixMonths,
+} from "./topicTracker";
 import { emitJobProgress } from "./sseHub";
 import { logger } from "../logger";
 
@@ -232,6 +235,22 @@ export async function executeGenerationJob(
       postType: t.postType,
     }));
 
+    const globalRows = await fetchGlobalTopicHistoryLastSixMonths(
+      prisma,
+      clientId,
+      year,
+      month,
+      client.specialty
+    );
+    const globalHistory = globalRows.map((t) => ({
+      month: t.month,
+      year: t.year,
+      topic: t.topic,
+      style: t.style,
+      postType: t.postType,
+      clientName: t.client.name,
+    }));
+
     const dbSpecials: SpecialDayInput[] = client.specialDays
       .filter((s: SpecialDay) => isDateInMonth(s.date, month, year))
       .map((s: SpecialDay) => ({
@@ -323,11 +342,20 @@ export async function executeGenerationJob(
       doctors: parseDoctorNames(client.doctorName, client.brandType as BrandType),
     };
 
-    const { system, user } = buildPrompt(profile, month, year, mergedSpecials, topicHistory);
+    const { system, user } = buildPrompt(
+      profile,
+      month,
+      year,
+      mergedSpecials,
+      topicHistory,
+      globalHistory
+    );
 
     logger.info("Generation prompt context", {
       jobId,
       effectivePosts,
+      clientHistoryCount: topicHistory.length,
+      globalHistoryCount: globalHistory.length,
       mergedSpecialDayCount: mergedSpecials.length,
       carouselCountOverride: data.carouselCountOverride,
       animatedCountOverride: data.animatedCountOverride,
@@ -430,7 +458,12 @@ export async function executeGenerationJob(
       await progress.updateProgress({ step: "content_review", pct: 58 });
 
       try {
-        const reviewed = await reviewAndRefineCalendarPosts(posts, profile, topicHistory);
+        const reviewed = await reviewAndRefineCalendarPosts(
+          posts,
+          profile,
+          topicHistory,
+          globalHistory
+        );
         const normalizedReview = normalizeClaudeCalendarPostsForValidation(reviewed as unknown[]);
         posts = z.array(calendarPostSchema).parse(normalizedReview);
         if (typeof carouselForRun === "number" || typeof animatedForRun === "number") {

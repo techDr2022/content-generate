@@ -40,6 +40,8 @@ export interface TopicHistoryPrompt {
   topic: string;
   style: string;
   postType: string;
+  /** Set on network-wide history rows so the model can avoid cross-client reuse. */
+  clientName?: string;
 }
 
 /** TechDr-branded accounts must avoid outcome guarantees in regulated healthcare marketing. */
@@ -68,10 +70,10 @@ function formatTopicHistory(topicHistory: TopicHistoryPrompt[]): string {
     return "(No prior topic history in the last 6 months.)";
   }
   return topicHistory
-    .map(
-      (t) =>
-        `- ${MONTH_NAMES[t.month - 1] ?? t.month} ${t.year}: topic="${t.topic}" | style="${t.style}" | postType="${t.postType}"`
-    )
+    .map((t) => {
+      const who = t.clientName ? ` client="${t.clientName}" |` : "";
+      return `- ${MONTH_NAMES[t.month - 1] ?? t.month} ${t.year}:${who} topic="${t.topic}" | style="${t.style}" | postType="${t.postType}"`;
+    })
     .join("\n");
 }
 
@@ -97,10 +99,12 @@ export function buildPrompt(
   month: number,
   year: number,
   specialDays: SpecialDayInput[],
-  topicHistory: TopicHistoryPrompt[]
+  topicHistory: TopicHistoryPrompt[],
+  globalHistory: TopicHistoryPrompt[] = []
 ): { system: string; user: string } {
   const monthName = MONTH_NAMES[month - 1] ?? String(month);
   const topicHistoryBlock = formatTopicHistory(topicHistory);
+  const globalHistoryBlock = formatTopicHistory(globalHistory);
   const specialDaysBlock = formatSpecialDays(specialDays);
   const brandKitBlock = formatBrandKitForCalendarPrompt(client.brandKit);
   const doctors =
@@ -121,15 +125,23 @@ export function buildPrompt(
     ? carouselN === 0 && animatedN === 0
       ? `- THIS RUN (hard requirement): Every row must have "type": "Poster" (total ${client.postsPerMonth} rows).`
       : `- THIS RUN (hard requirement): Exactly ${carouselN} row(s) "Carousel", exactly ${animatedN} row(s) "Animated", and exactly ${posterRemainder} row(s) "Poster" (total ${client.postsPerMonth}).
-- Carousels: step-by-step, comparisons, Do's & Don'ts, educational breakdowns.
-- Animated: Instagram Reels / short VIDEO scripts (not static posters). Each Animated row MUST have motion-friendly "textInImage": start with "▶ Reel tip:" or similar hook, 3–5 short on-screen caption lines, then CTA + clinic + city. "supportingText" should reference watching the reel once.
+- Carousels: each row is a different mechanism (quiz, myth vs fact, rapid fire, mini case, one-word answer, checklist, timeline, decision tree, spot the red flag). Put slide count and slide text in "textInImage" as "Slide 1:", "Slide 2:", … Use 4–8 slides. Pick the count the idea needs. No filler slides. Vary the count across the month. Never make every carousel Hook → Point 1 → Point 2 → Point 3 → CTA.
+- Animated: short-form video scripts, 15–20 seconds (absolute max 30; never plan 45s or 60s). "textInImage" starts with the duration (e.g. "15s") then HOOK (0–3s) → DEVELOPMENT → PAYOFF → CTA + clinic + city. "supportingText" mentions the short video once.
 - Use "Poster" for other style intents.`
-    : `- Use carousels ONLY if client.useCarousels = true, and only for: step-by-step, comparisons, Do's & Don'ts, educational breakdowns
+      : `- Use carousels ONLY if client.useCarousels = true. Each carousel needs its own mechanism (quiz, myth vs fact, rapid fire, mini case, checklist, timeline, decision tree). Do not use the same mechanism twice in the month.
 - All others = Poster`;
 
-  const system = `You are an expert healthcare Instagram content strategist for a digital marketing agency. You generate monthly content calendars for medical clients.
+  const system = `You are the Content Intelligence Engine for TechDr Content Studio. You generate healthcare marketing content for hospitals, clinics, doctors, specialists, and healthcare brands.
 
-You MUST follow every rule below exactly. Do not invent rules. Do not summarize these rules elsewhere — they govern your output.
+Your job is not to write generic medical content. Study this client's brand, specialty, service lines, audience, location, content types, CTAs, restrictions, and prior calendars, then plan one original month before writing any piece.
+
+Every piece must answer: who it is for, which specialty and service it belongs to, why this audience cares, why it belongs on THIS client's page, and how it differs from the rest of this month and from other TechDr clients.
+
+Plan the month first (count, dates, type, specialty, topic, format, special days, variety). Do not write pieces independently. Only use content types allowed for this run. Do not invent a type the run did not request.
+
+Never diagnose the reader, guarantee outcomes, promise cures, invent statistics or studies, encourage unsafe self-medication, give dosages, present fiction as a real patient, use fear-based claims, or claim "best" without evidence. Prefer "may", "can", "could", and "consult a healthcare professional".
+
+You MUST follow every rule below exactly. The JSON contract at the end is how this application stores the calendar — do not add keys and do not omit keys.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 POST COUNT
@@ -137,8 +149,8 @@ POST COUNT
 
 - Output a JSON array whose length is EXACTLY client.postsPerMonth (provided in the user message).
 - The RUN SPECIAL DAYS list (below) reserves specific calendar dates: you MUST include one row per listed date with specialDayLabel matching that label and isAIAdded false. Do not skip any listed date to make room for generic posts.
-- Remaining rows (until the total reaches client.postsPerMonth) are general specialty or awareness content (SP1 / SP2 / AWR as appropriate).
-- Optional invented awareness rows (not listed under RUN SPECIAL DAYS) may use isAIAdded true and code "AWR" only when they do not replace a mandatory listed special day; if space is tight, omit invented extras — never omit a listed special day.
+- Remaining rows (until the total reaches client.postsPerMonth) are specialty education for this client (SP1 / SP2). Do not invent a health awareness day, festival, or observance that is not in RUN SPECIAL DAYS.
+- Set isAIAdded true only when a row is general specialty education with no listed special day. Listed special days always use isAIAdded false.
 - Each listed special day = exactly 1 post. Never split.
 - Never repeat the same special day in the same month.
 - For isAIAdded true rows only, the spreadsheet layer will show a marker from your flag (Code stays one of "SP1", "SP2", "AWR").
@@ -157,33 +169,35 @@ HIGH-VOLUME MONTH (${client.postsPerMonth} posts in one JSON array)
 }
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TOPIC RULES
+TOPIC AND ORIGINALITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-- Never repeat a topic used in the last 6 months (check topicHistory).
-- Topics must be highly specific to the client's specialty/specialties.
-- Include the full 6-month topic history in the prompt so Claude can audit it (the history is provided below in the user message).
+- Topics must be specific to this client's specialties and listed services. Do not fill the month with generic healthcare.
+- Never repeat a topic, or the same underlying idea, from this client's last 6 months (CLIENT TOPIC HISTORY in the user message).
+- GLOBAL CONTENT MEMORY lists topics other TechDr clients used in the last 6 months. A different title, hook, or format does not make a reused idea original. "5 signs of an ACL injury", "how to know if you have an ACL injury", and "could these symptoms mean ACL damage" are the same topic family. Reject that family and choose a genuinely different idea.
+- Inside this calendar, one patient question gets one piece. "Child with persistent cough" and "why is my child coughing again" are the same piece.
+- Same specialty across clients is not a shared content bank. Differentiate by this client's services, audience, and positioning.
+- Special-day angles must also differ from angles already used in GLOBAL CONTENT MEMORY.
+- Do not let the month become a listicle run ("3 signs", "5 signs", "7 things", "6 symptoms").
+- Before you finish, apply this test: if two doctors who know each other saw these posts the same week, would either think TechDr recycled another client's content? If yes, replace that piece.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONTENT STYLES (rotate these 10, never back-to-back)
+CONTENT MECHANISMS (field name: "style")
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. Short Statement
-2. Label : Value
-3. Myth vs Fact
-4. Dos & Don'ts
-5. Q&A
-6. Did You Know
-7. Warning Signs
-8. Quick Fact
-9. Awareness Quote
-10. Festive / Greeting
+Rotate mechanisms. Never use the same style on back-to-back rows. Vary hook, structure, and audience angle — not only the medical noun.
 
-STYLE DISTRIBUTION for 15 posts:
-- Max 2 uses per style
-- Myth vs Fact, Q&A, Did You Know, Awareness Quote, Festive/Greeting → ideally only once
+Preferred mechanisms (use the name as "style"):
+Short Statement, Label : Value, Myth vs Fact, Dos & Don'ts, Q&A, Did You Know, Warning Signs, Quick Fact, Awareness Quote, Festive / Greeting, Quiz, Rapid Fire, One-Word Answer, Mini Case, Timeline, Checklist, Decision Tree, Spot the Red Flag, Normal or Not, Parent POV, Patient POV, Scenario.
 
-(If client.postsPerMonth is not 15, scale fairly: still never back-to-back; still cap repeats sensibly; still prefer single use for the styles called out above when total posts allow.)
+Distribution:
+- Max 2 uses of any one style in the month.
+- Myth vs Fact, Q&A, Did You Know, Awareness Quote, Festive / Greeting, Quiz → ideally once.
+- Do not open most rows with "5 signs", "Did you know", "Don't ignore", "3 things", or "Is this normal?".
+
+Festive rows are not generic greetings unless the client notes ask for a greeting. Tie the festival to family, safety, wellbeing, or this hospital's audience.
+
+Spread dates across the month. One post per calendar day. Put each listed special day on its real date. Do not let special days consume the whole month — keep a mix of education, prevention, patient questions, and brand. Never invent an awareness day that is not in RUN SPECIAL DAYS.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 POST TYPE
@@ -462,8 +476,11 @@ ${JSON.stringify(
 RUN SPECIAL DAYS FOR THIS MONTH (mandatory coverage — includes the client’s saved dates for this month plus any extra dates passed for this run; do not duplicate):
 ${specialDaysBlock}
 
-FULL 6-MONTH TOPIC HISTORY (audit every topic; never repeat any topic string/idea already used):
+CLIENT TOPIC HISTORY — last 6 months for THIS client (do not repeat the idea, not only the title):
 ${topicHistoryBlock}
+
+GLOBAL CONTENT MEMORY — other TechDr clients, last 6 months (same idea = duplicate even if the wording changed; same-specialty rows are the highest risk):
+${globalHistoryBlock}
 
 DEPARTMENT NAMING:
 - For SP1 rows, set "department" to the client's primary specialty label (specialty[0] if present).

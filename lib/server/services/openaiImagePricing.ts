@@ -39,8 +39,8 @@ export function estimateOpenAiImageCostUsd(input: {
   return 0.06;
 }
 
-function mapGptQuality(q: PosterImageQualityId): "low" | "medium" | "high" {
-  if (q === "low" || q === "medium" || q === "high") return q;
+function mapGptQuality(q: PosterImageQualityId): "low" | "medium" | "high" | "xhigh" | "max" {
+  if (q === "low" || q === "medium" || q === "high" || q === "xhigh" || q === "max") return q;
   return "medium";
 }
 
@@ -51,12 +51,16 @@ function normalizeSizeKey(size?: string): string {
   return "1024x1024";
 }
 
-/** Per-image USD for square output; portrait/landscape scaled ~1.25×. */
-function gptImageSquareUsd(model: string, quality: "low" | "medium" | "high"): number {
+/** Rough per-image USD for square output. xhigh/max scale from high; OpenAI bills by tokens. */
+function gptImageSquareUsd(
+  model: string,
+  quality: "low" | "medium" | "high" | "xhigh" | "max"
+): number {
   const is15 = model.includes("1.5") || model.includes("1-5");
+  const high = is15 ? 0.13 : 0.167;
   const table = is15
-    ? { low: 0.009, medium: 0.034, high: 0.13 }
-    : { low: 0.011, medium: 0.042, high: 0.167 };
+    ? { low: 0.009, medium: 0.034, high, xhigh: high * 1.6, max: high * 2.2 }
+    : { low: 0.011, medium: 0.042, high, xhigh: high * 1.6, max: high * 2.2 };
   return table[quality];
 }
 

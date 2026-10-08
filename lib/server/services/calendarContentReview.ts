@@ -18,8 +18,10 @@ Rules:
 - Keep "date", "code", "department", "isAIAdded", and "specialDayLabel" unchanged unless clearly wrong vs the client brief.
 - Fix "supportingText" structure: main body, then optional supportingTextDefault block (verbatim if provided), then hashtags last. Use \\n for line breaks inside strings.
 - Fix "textInImage" to match the row's "style" template and end with one CTA + clinic + city lines.
-- Never promise cures or guaranteed outcomes (healthcare compliance).
+- Never promise cures, guaranteed outcomes, invented statistics, dosages, or fear-based claims.
 - Do not remove mandatory special-day rows or change their calendar dates.
+- If two rows share the same patient question or topic family, rewrite the later row into a genuinely different idea.
+- If a topic matches CLIENT or GLOBAL history (same idea, even with different wording), replace that topic. Do not only retitle it.
 
 POST TYPE (critical):
 - Rows with "type":"Animated" are Instagram Reels / short video scripts — NOT static posters.
@@ -41,7 +43,8 @@ No markdown fences. Use JSON.parse-safe strings only (\\n for newlines).`;
 function buildReviewUser(
   client: ClientPromptProfile,
   posts: CalendarPost[],
-  topicHistory: TopicHistoryPrompt[]
+  topicHistory: TopicHistoryPrompt[],
+  globalHistory: TopicHistoryPrompt[]
 ): string {
   const animatedN = posts.filter((p) => p.type === "Animated").length;
   const carouselN = posts.filter((p) => p.type === "Carousel").length;
@@ -62,8 +65,11 @@ ${JSON.stringify(
 
 TYPE TARGETS IN THIS ARRAY: ${posts.filter((p) => p.type === "Poster").length} Poster, ${carouselN} Carousel, ${animatedN} Animated (do not change type counts).
 
-TOPIC HISTORY (do not reuse topics):
+CLIENT TOPIC HISTORY (do not reuse the idea):
 ${topicHistory.map((t) => `- ${t.topic}`).join("\n") || "(none)"}
+
+GLOBAL CONTENT MEMORY (other TechDr clients — same idea is a duplicate):
+${globalHistory.map((t) => `- ${t.clientName ?? "other"}: ${t.topic}`).join("\n") || "(none)"}
 
 CALENDAR JSON TO REVIEW AND UPDATE:
 ${JSON.stringify(posts)}`;
@@ -75,13 +81,14 @@ ${JSON.stringify(posts)}`;
 export async function reviewAndRefineCalendarPosts(
   posts: CalendarPost[],
   client: ClientPromptProfile,
-  topicHistory: TopicHistoryPrompt[]
+  topicHistory: TopicHistoryPrompt[],
+  globalHistory: TopicHistoryPrompt[] = []
 ): Promise<CalendarPost[]> {
   if (posts.length === 0) return posts;
 
   const compact = posts.length >= 9;
   const system = buildReviewSystem(compact);
-  const user = buildReviewUser(client, posts, topicHistory);
+  const user = buildReviewUser(client, posts, topicHistory, globalHistory);
 
   logger.info("Calendar content review starting", {
     rowCount: posts.length,

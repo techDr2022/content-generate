@@ -17,7 +17,9 @@ Rules:
 - For type "Animated": start with "▶ Reel tip:" or similar hook; 3–5 short on-screen lines; motion-friendly.
 - For type "Carousel": use lists or stepwise layout suitable for slides.
 - Use \\n for line breaks inside the string value in JSON.
-- Healthcare compliance: no guaranteed outcomes or cures.
+- Healthcare compliance: no guaranteed outcomes, cures, invented statistics, dosages, or fear-based claims.
+- For type "Carousel": write distinct slides as "Slide 1:" through "Slide N:" (4–8 slides, no filler). The mechanism must match "style".
+- For type "Animated": open with a duration of 15s or 20s (never over 30s), then hook, development, payoff, CTA.
 
 Respond with JSON only: { "textInImage": "..." }. No markdown fences.`;
 
