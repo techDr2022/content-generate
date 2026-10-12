@@ -2,6 +2,7 @@ import { z } from "zod";
 import { MAX_ANIMATED_PER_MONTH, MAX_CAROUSELS_PER_MONTH } from "@/lib/constants/cadence";
 import { prisma } from "@/lib/server/prisma";
 import { HttpError } from "@/lib/server/http";
+import { anthropicSuggestHttpError } from "@/lib/server/services/anthropicSuggestRetry";
 import { addGenerateJobWithRetry } from "@/lib/server/queueEnqueue";
 import { getContentQueue } from "@/lib/server/services/jobQueue";
 import { emitJobProgress } from "@/lib/server/services/sseHub";
@@ -247,16 +248,6 @@ export async function suggestSpecialDays(userId: string, body: unknown) {
 
     return { success: true as const, data };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("ANTHROPIC_API_KEY")) {
-      throw new HttpError(503, msg);
-    }
-    if (/529|overloaded|Overloaded|rate_limit|429/i.test(msg)) {
-      throw new HttpError(
-        503,
-        "Anthropic is temporarily overloaded or rate-limited. Wait 30–60 seconds and try Suggest days again."
-      );
-    }
-    throw new HttpError(502, `Could not suggest special days: ${msg}`);
+    throw anthropicSuggestHttpError(err, "suggest special days");
   }
 }

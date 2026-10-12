@@ -1,6 +1,6 @@
 import axios from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type ApiResponse } from "@/lib/api";
+import { api, getApiErrorMessage, type ApiResponse } from "@/lib/api";
 import { ENQUEUE_TIMEOUT_MS, postEnqueueWithRetry } from "@/lib/enqueueRetry";
 import type { CalendarPost, GenerationJobDTO } from "@/lib/types";
 
@@ -68,15 +68,19 @@ export type RunSpecialDayRow = NonNullable<GeneratePayload["extraSpecialDays"]>[
 export function useSuggestSpecialDays() {
   return useMutation({
     mutationFn: async (payload: { clientId: string; month: number; year: number }) => {
-      const res = await api.post<ApiResponse<NonNullable<GeneratePayload["extraSpecialDays"]>>>(
-        "/api/generate/suggest-special-days",
-        payload,
-        { timeout: 120_000 }
-      );
-      if (!res.data.success || !res.data.data) {
-        throw new Error(res.data.error ?? "Could not suggest special days");
+      try {
+        const res = await api.post<ApiResponse<NonNullable<GeneratePayload["extraSpecialDays"]>>>(
+          "/api/generate/suggest-special-days",
+          payload,
+          { timeout: 120_000 }
+        );
+        if (!res.data.success || !res.data.data) {
+          throw new Error(res.data.error ?? "Could not suggest special days");
+        }
+        return res.data.data;
+      } catch (err) {
+        throw new Error(getApiErrorMessage(err));
       }
-      return res.data.data;
     },
   });
 }

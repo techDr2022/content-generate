@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { HttpError } from "@/lib/server/http";
+import { anthropicSuggestHttpError } from "@/lib/server/services/anthropicSuggestRetry";
 import { suggestServicesWithClaude } from "@/lib/server/services/suggestServicesService";
 
 const bodySchema = z.object({
@@ -23,16 +23,6 @@ export async function suggestServices(body: unknown) {
     });
     return { success: true as const, data: { services } };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("ANTHROPIC_API_KEY")) {
-      throw new HttpError(503, msg);
-    }
-    if (/529|overloaded|Overloaded|rate_limit|429/i.test(msg)) {
-      throw new HttpError(
-        503,
-        "Anthropic is temporarily overloaded or rate-limited. Wait 30–60 seconds and try again."
-      );
-    }
-    throw new HttpError(502, `Could not suggest services: ${msg}`);
+    throw anthropicSuggestHttpError(err, "suggest services");
   }
 }
